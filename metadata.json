@@ -1,0 +1,8 @@
+{
+  "name": "Lunora — Boutique Online & Gestão",
+  "description": "Boutique de moda minimalista com loja editorial e painel de gestão integrado em tempo real.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
