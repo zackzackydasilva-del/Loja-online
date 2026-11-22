@@ -23,6 +23,7 @@ import {
 
 const CART_STORAGE_KEY = 'lunora_cart_v2';
 const WISHLIST_STORAGE_KEY = 'lunora_wishlist_v2';
+const ADMIN_TOKEN_STORAGE_KEY = 'lunora_admin_token_v1';
 
 interface CheckoutPayload {
   customerName: string;
@@ -164,9 +165,28 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [quickViewProduct, setQuickViewProduct] = useState<Product | null>(null);
 
-  const [adminToken, setAdminToken] = useState<string | null>(null);
+  const [adminToken, setAdminTokenState] = useState<string | null>(() => {
+    try {
+      return sessionStorage.getItem(ADMIN_TOKEN_STORAGE_KEY);
+    } catch {
+      return null;
+    }
+  });
   const [adminAuthMode, setAdminAuthMode] = useState<'loading' | 'setup' | 'login' | 'authenticated'>('loading');
   const [adminManagedByEnv, setAdminManagedByEnv] = useState<boolean>(false);
+
+  const setAdminToken = useCallback((token: string | null) => {
+    setAdminTokenState(token);
+    try {
+      if (token) {
+        sessionStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, token);
+      } else {
+        sessionStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
+      }
+    } catch {
+      // Ignore storage write errors
+    }
+  }, []);
 
   useEffect(() => {
     try {
@@ -267,6 +287,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password }),
       });
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        return { ok: false, error: 'Servidor de API indisponível nesta rota.' };
+      }
       const data = await res.json();
       if (!res.ok || !data.token) {
         return { ok: false, error: data.error || 'Falha na autenticação.' };
@@ -287,6 +311,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password }),
       });
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        return { ok: false, error: 'Servidor de API indisponível nesta rota.' };
+      }
       const data = await res.json();
       if (!res.ok || !data.token) {
         return { ok: false, error: data.error || 'Não foi possível configurar o acesso.' };
@@ -572,6 +600,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: normalized, source: 'profile' }),
       });
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        return {
+          status: 'error',
+          error: 'Não foi possível contactar o servidor da loja. Tente novamente.',
+        };
+      }
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         return { status: 'error', error: data.error || 'Erro ao subscrever newsletter.' };

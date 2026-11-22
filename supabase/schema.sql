@@ -150,17 +150,21 @@ create index if not exists idx_stock_movements_product_id on public.stock_moveme
 create index if not exists idx_tasks_order_id on public.tasks(order_id);
 create index if not exists idx_store_costs_date on public.store_costs(cost_date);
 
--- Row Level Security (acesso seguro pelo servidor Express via SUPABASE_SERVICE_ROLE_KEY)
-alter table public.categories enable row level security;
-alter table public.products enable row level security;
-alter table public.customers enable row level security;
-alter table public.orders enable row level security;
-alter table public.order_items enable row level security;
-alter table public.stock_movements enable row level security;
-alter table public.goals enable row level security;
-alter table public.tasks enable row level security;
-alter table public.campaigns enable row level security;
-alter table public.weekly_sales enable row level security;
-alter table public.store_settings enable row level security;
-alter table public.newsletter_subscribers enable row level security;
-alter table public.store_costs enable row level security;
+-- Row Level Security desativado para garantir que todos os visitantes vejam exatamente os mesmos produtos e definições
+alter table public.categories disable row level security;
+alter table public.products disable row level security;
+alter table public.customers disable row level security;
+alter table public.orders disable row level security;
+alter table public.order_items disable row level security;
+alter table public.stock_movements disable row level security;
+alter table public.goals disable row level security;
+alter table public.tasks disable row level security;
+alter table public.campaigns disable row level security;
+alter table public.weekly_sales disable row level security;
+alter table public.store_settings disable row level security;
+alter table public.newsletter_subscribers disable row level security;
+alter table public.store_costs disable row level security;
+
+grant usage on schema public to anon, authenticated, service_role;
+grant all on all tables in schema public to anon, authenticated, service_role;
+grant all on all sequences in schema public to anon, authenticated, service_role;

@@ -445,7 +445,7 @@ async function ensureSupabaseSeeded(supabase: SupabaseClient): Promise<boolean> 
         if (projectRef) {
           const createdCosts = await executeSupabaseSql(
             projectRef,
-            "CREATE TABLE IF NOT EXISTS public.store_costs (id text primary key, title text not null, category text not null default 'Operacional', amount numeric(12, 2) not null check (amount >= 0), cost_date text not null, created_at timestamptz not null default now()); CREATE INDEX IF NOT EXISTS idx_store_costs_date ON public.store_costs(cost_date); ALTER TABLE public.store_costs enable row level security;"
+            "CREATE TABLE IF NOT EXISTS public.store_costs (id text primary key, title text not null, category text not null default 'Operacional', amount numeric(12, 2) not null check (amount >= 0), cost_date text not null, created_at timestamptz not null default now()); CREATE INDEX IF NOT EXISTS idx_store_costs_date ON public.store_costs(cost_date); ALTER TABLE public.store_costs disable row level security;"
           );
           if (createdCosts) {
             for (let attempt = 0; attempt < 3; attempt++) {
@@ -458,6 +458,35 @@ async function ensureSupabaseSeeded(supabase: SupabaseClient): Promise<boolean> 
         hasStoreCostsTable = !costsProbe.error;
       } else {
         hasStoreCostsTable = true;
+      }
+
+      if (
+        projectRef &&
+        (process.env.SUPABASE_DB_PASSWORD ||
+          process.env.SUPABASE_DB_URL ||
+          process.env.DATABASE_URL ||
+          process.env.POSTGRES_URL)
+      ) {
+        await executeSupabaseSql(
+          projectRef,
+          `
+          ALTER TABLE IF EXISTS public.categories DISABLE ROW LEVEL SECURITY;
+          ALTER TABLE IF EXISTS public.products DISABLE ROW LEVEL SECURITY;
+          ALTER TABLE IF EXISTS public.customers DISABLE ROW LEVEL SECURITY;
+          ALTER TABLE IF EXISTS public.orders DISABLE ROW LEVEL SECURITY;
+          ALTER TABLE IF EXISTS public.order_items DISABLE ROW LEVEL SECURITY;
+          ALTER TABLE IF EXISTS public.stock_movements DISABLE ROW LEVEL SECURITY;
+          ALTER TABLE IF EXISTS public.goals DISABLE ROW LEVEL SECURITY;
+          ALTER TABLE IF EXISTS public.tasks DISABLE ROW LEVEL SECURITY;
+          ALTER TABLE IF EXISTS public.campaigns DISABLE ROW LEVEL SECURITY;
+          ALTER TABLE IF EXISTS public.weekly_sales DISABLE ROW LEVEL SECURITY;
+          ALTER TABLE IF EXISTS public.store_settings DISABLE ROW LEVEL SECURITY;
+          ALTER TABLE IF EXISTS public.newsletter_subscribers DISABLE ROW LEVEL SECURITY;
+          ALTER TABLE IF EXISTS public.store_costs DISABLE ROW LEVEL SECURITY;
+          GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+          GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
+          `.trim()
+        ).catch(() => false);
       }
 
       const catRes = await supabase.from('categories').upsert(CATEGORIES_SEED, { onConflict: 'slug' });
