@@ -150,47 +150,48 @@ let cachedClient: SupabaseClient | null = null;
 let seededChecked = false;
 
 function resolveSupabaseUrl(rawUrl: string | undefined, key: string | undefined): string | null {
-  const cleanUrl = (rawUrl || '').trim().replace(/^["']|["']$/g, '');
-  if (cleanUrl.startsWith('https://') && cleanUrl.includes('.supabase.co')) {
-    return cleanUrl.replace(/\/+$/, '');
-  }
-  if (cleanUrl.includes('.supabase.co') && !cleanUrl.startsWith('http')) {
-    return `https://${cleanUrl.replace(/^\/+|\/+$/g, '')}`;
-  }
-  const dashboardMatch = cleanUrl.match(/supabase\.com\/dashboard\/project\/([a-z0-9]+)/i);
-  if (dashboardMatch?.[1]) {
-    return `https://${dashboardMatch[1]}.supabase.co`;
-  }
-  // Fallback: extract project ref from Supabase JWT payload (non-secret public claim)
-  if (key && key.startsWith('eyJ')) {
-    try {
-      const parts = key.split('.');
-      if (parts.length === 3) {
-        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
-        if (payload?.iss === 'supabase' && typeof payload?.ref === 'string' && /^[a-z0-9]+$/i.test(payload.ref)) {
-          return `https://${payload.ref}.supabase.co`;
-        }
+  const cleanUrl = (rawUrl || '').trim().replace(/^[\s"'`<>]+|[\s"'`<>]+$/g, '');
+
+  const jwtRef = extractProjectRefFromJwt(key);
+
+  if (cleanUrl) {
+    const dashboardMatch = cleanUrl.match(/supabase\.com\/dashboard\/project\/([a-z0-9]+)/i);
+    if (dashboardMatch?.[1]) {
+      return `https://${dashboardMatch[1]}.supabase.co`;
+    }
+
+    const dbHostMatch = cleanUrl.match(/(?:^|[@/])db\.([a-z0-9-]+)\.supabase\.co(?:[:/?#]|$)/i);
+    if (dbHostMatch?.[1]) {
+      return `https://${dbHostMatch[1]}.supabase.co`;
+    }
+
+    const supaHostMatch = cleanUrl.match(/([a-z0-9-]+)\.supabase\.co/i);
+    if (supaHostMatch?.[1] && !cleanUrl.startsWith('postgres')) {
+      return `https://${supaHostMatch[1]}.supabase.co`;
+    }
+
+    if (jwtRef) {
+      return `https://${jwtRef}.supabase.co`;
+    }
+
+    if (cleanUrl.startsWith('https://') || cleanUrl.startsWith('http://')) {
+      try {
+        const parsed = new URL(cleanUrl);
+        return parsed.origin;
+      } catch {
+        // Fall through
       }
-    } catch {
-      // Ignore malformed JWT
     }
   }
-  if (cleanUrl.startsWith('https://') || cleanUrl.startsWith('http://')) {
-    return cleanUrl.replace(/\/+$/, '');
+
+  if (jwtRef) {
+    return `https://${jwtRef}.supabase.co`;
   }
+
   return null;
 }
 
 function getCleanedSupabaseEnv() {
-  const rawUrl = (
-    process.env.SUPABASE_URL ||
-    process.env.VITE_SUPABASE_URL ||
-    process.env.NEXT_PUBLIC_SUPABASE_URL ||
-    ''
-  )
-    .trim()
-    .replace(/^["']|["']$/g, '');
-
   const key = (
     process.env.SUPABASE_SERVICE_ROLE_KEY ||
     process.env.SUPABASE_SERVICE_KEY ||
@@ -201,9 +202,27 @@ function getCleanedSupabaseEnv() {
     ''
   )
     .trim()
-    .replace(/^["']|["']$/g, '');
+    .replace(/^[\s"'`<>]+|[\s"'`<>]+$/g, '');
 
-  const url = resolveSupabaseUrl(rawUrl, key);
+  const urlCandidates = [
+    process.env.SUPABASE_URL,
+    process.env.VITE_SUPABASE_URL,
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+  ];
+
+  let url: string | null = null;
+  for (const candidate of urlCandidates) {
+    if (!candidate || !candidate.trim()) continue;
+    const resolved = resolveSupabaseUrl(candidate, key);
+    if (resolved) {
+      url = resolved;
+      break;
+    }
+  }
+  if (!url) {
+    url = resolveSupabaseUrl(undefined, key);
+  }
+
   return { url, key };
 }
 
