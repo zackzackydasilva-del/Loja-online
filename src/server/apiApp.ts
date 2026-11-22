@@ -643,9 +643,12 @@ app.patch('/api/admin/settings', requireAdminAuth, async (req, res) => {
     if (body.storefrontConfig && typeof body.storefrontConfig === 'object') {
       const cfg = structuredClone(body.storefrontConfig);
       if (Array.isArray(cfg.heroSlides)) {
-        cfg.heroSlides = cfg.heroSlides.filter(
-          (s: any) => s && typeof s.image === 'string' && isSafeAssetUrl(s.image)
-        );
+        cfg.heroSlides = cfg.heroSlides
+          .filter(
+            (s: any) =>
+              s && typeof s.image === 'string' && (s.image.trim() === '' || isSafeAssetUrl(s.image))
+          )
+          .map((s: any) => ({ ...s, image: s.image.trim() === '' ? '' : s.image }));
       }
       if (Array.isArray(cfg.categoryStripItems)) {
         cfg.categoryStripItems = cfg.categoryStripItems.map((c: any) =>
@@ -653,17 +656,28 @@ app.patch('/api/admin/settings', requireAdminAuth, async (req, res) => {
         );
       }
       if (Array.isArray(cfg.editorialCards)) {
-        cfg.editorialCards = cfg.editorialCards.filter(
-          (c: any) => c && typeof c.image === 'string' && isSafeAssetUrl(c.image)
-        );
+        cfg.editorialCards = cfg.editorialCards
+          .filter(
+            (c: any) =>
+              c && typeof c.image === 'string' && (c.image.trim() === '' || isSafeAssetUrl(c.image))
+          )
+          .map((c: any) => ({ ...c, image: c.image.trim() === '' ? '' : c.image }));
       }
       if (Array.isArray(cfg.promoBanners)) {
-        cfg.promoBanners = cfg.promoBanners.filter(
-          (b: any) => b && typeof b.image === 'string' && isSafeAssetUrl(b.image)
-        );
+        cfg.promoBanners = cfg.promoBanners
+          .filter(
+            (b: any) =>
+              b && typeof b.image === 'string' && (b.image.trim() === '' || isSafeAssetUrl(b.image))
+          )
+          .map((b: any) => ({ ...b, image: b.image.trim() === '' ? '' : b.image }));
       }
-      if (cfg.newsletter?.image && !isSafeAssetUrl(String(cfg.newsletter.image))) {
-        delete cfg.newsletter.image;
+      if (cfg.newsletter?.image !== undefined) {
+        const nlImg = String(cfg.newsletter.image).trim();
+        if (!nlImg) {
+          cfg.newsletter.image = '';
+        } else if (!isSafeAssetUrl(nlImg)) {
+          cfg.newsletter.image = '';
+        }
       }
       updates.storefrontConfig = cfg;
     }

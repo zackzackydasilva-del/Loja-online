@@ -51,14 +51,16 @@ export const TrustAndNewsletter: React.FC = () => {
 
       {/* Newsletter Split Banner */}
       <div className="rounded-2xl overflow-hidden bg-[#EFECE5] border border-[#141413]/8 grid grid-cols-1 md:grid-cols-12 items-stretch">
-        <div className="md:col-span-4 min-h-[220px] max-h-[280px]">
-          <SafeImage
-            src={nl.image}
-            alt={nl.title}
-            className="w-full h-full object-cover object-top"
-          />
-        </div>
-        <div className="md:col-span-8 p-8 md:p-12 flex flex-col justify-center">
+        {nl.image?.trim() && (
+          <div className="md:col-span-4 min-h-[220px] max-h-[280px]">
+            <SafeImage
+              src={nl.image}
+              alt={nl.title}
+              className="w-full h-full object-cover object-top"
+            />
+          </div>
+        )}
+        <div className={`${nl.image?.trim() ? 'md:col-span-8' : 'md:col-span-12'} p-8 md:p-12 flex flex-col justify-center`}>
           <p className="text-xs font-medium tracking-[0.14em] text-[#66635C] mb-2">
             {nl.eyebrow}
           </p>

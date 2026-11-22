@@ -41,13 +41,15 @@ export const CollectionBento: React.FC<CollectionBentoProps> = ({ onExploreCateg
             key={`${card.category}-${idx}`}
             type="button"
             onClick={() => onExploreCategory(card.category)}
-            className="group relative aspect-[3/4] rounded-xl overflow-hidden bg-[#E9E4DB] text-left cursor-pointer focus-visible:outline-2 focus-visible:outline-[#141413]"
+            className="group relative aspect-[3/4] rounded-xl overflow-hidden bg-[#1C1C1E] text-left cursor-pointer focus-visible:outline-2 focus-visible:outline-[#141413]"
           >
-            <SafeImage
-              src={card.image}
-              alt={card.title}
-              className="w-full h-full object-cover object-center transition-transform duration-500 group-hover:scale-[1.03]"
-            />
+            {card.image?.trim() && (
+              <SafeImage
+                src={card.image}
+                alt={card.title}
+                className="w-full h-full object-cover object-center transition-transform duration-500 group-hover:scale-[1.03]"
+              />
+            )}
             <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/20 to-transparent" />
             <div className="absolute bottom-5 left-5 right-5 text-white">
               <p className="font-serif text-xl font-medium mb-1">{card.title}</p>
@@ -62,36 +64,41 @@ export const CollectionBento: React.FC<CollectionBentoProps> = ({ onExploreCateg
 
       {/* 2 Split Promotional Banners */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {cfg.promoBanners.map((banner, idx) => (
-          <div
-            key={`promo-banner-${idx}`}
-            className="relative rounded-xl bg-[#EFECE5] overflow-hidden grid grid-cols-12 items-center min-h-[210px] border border-[#141413]/6"
-          >
-            <div className="col-span-7 p-7 md:p-8">
-              <p className="text-[11px] font-medium tracking-[0.14em] text-[#66635C] mb-1.5">
-                {banner.eyebrow}
-              </p>
-              <h3 className="font-serif text-2xl md:text-[26px] leading-tight text-[#141413] mb-4 whitespace-pre-line">
-                {banner.title}
-              </h3>
-              <button
-                type="button"
-                onClick={() => onExploreCategory(banner.targetCategory || 'Todos')}
-                className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#141413] text-[#F8F6F2] text-xs font-medium rounded-lg hover:bg-[#2B2B29] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-              >
-                <span>{banner.ctaText}</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
+        {cfg.promoBanners.map((banner, idx) => {
+          const hasImg = Boolean(banner.image && banner.image.trim());
+          return (
+            <div
+              key={`promo-banner-${idx}`}
+              className="relative rounded-xl bg-[#EFECE5] overflow-hidden grid grid-cols-12 items-center min-h-[210px] border border-[#141413]/6"
+            >
+              <div className={`${hasImg ? 'col-span-7' : 'col-span-12'} p-7 md:p-8`}>
+                <p className="text-[11px] font-medium tracking-[0.14em] text-[#66635C] mb-1.5">
+                  {banner.eyebrow}
+                </p>
+                <h3 className="font-serif text-2xl md:text-[26px] leading-tight text-[#141413] mb-4 whitespace-pre-line">
+                  {banner.title}
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => onExploreCategory(banner.targetCategory || 'Todos')}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#141413] text-[#F8F6F2] text-xs font-medium rounded-lg hover:bg-[#2B2B29] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <span>{banner.ctaText}</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              {hasImg && (
+                <div className="col-span-5 h-full min-h-[210px]">
+                  <SafeImage
+                    src={banner.image}
+                    alt={banner.title}
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+              )}
             </div>
-            <div className="col-span-5 h-full min-h-[210px]">
-              <SafeImage
-                src={banner.image}
-                alt={banner.title}
-                className="w-full h-full object-cover"
-              />
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </section>
   );

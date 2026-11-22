@@ -664,7 +664,7 @@ export const AdminSettings: React.FC = () => {
                       ...sf.heroSlides,
                       {
                         index: nextNum,
-                        image: sf.heroSlides[0]?.image || DEFAULT_STOREFRONT_CONFIG.heroSlides[0].image,
+                        image: '',
                         caption: `Look ${nextNum}`,
                       },
                     ],
@@ -680,28 +680,43 @@ export const AdminSettings: React.FC = () => {
             <div className="space-y-4">
               {sf.heroSlides.map((slide, idx) => (
                 <div key={idx} className="p-4 rounded-2xl bg-[#F6F6F4] space-y-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2">
                     <span className="text-xs font-mono font-semibold text-[#1C1C1E]">
                       Slide {String(idx + 1).padStart(2, '0')}
                     </span>
-                    {sf.heroSlides.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const filtered = sf.heroSlides
-                            .filter((_, i) => i !== idx)
-                            .map((item, i) => ({
-                              ...item,
-                              index: String(i + 1).padStart(2, '0'),
-                            }));
-                          setSf({ ...sf, heroSlides: filtered });
-                        }}
-                        className="inline-flex items-center gap-1 text-[11px] text-red-700 hover:underline cursor-pointer"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>Remover</span>
-                      </button>
-                    )}
+                    <div className="flex items-center gap-3">
+                      {slide.image?.trim() && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = [...sf.heroSlides];
+                            next[idx] = { ...next[idx], image: '' };
+                            setSf({ ...sf, heroSlides: next });
+                          }}
+                          className="inline-flex items-center gap-1 text-[11px] text-[#555552] hover:text-[#1C1C1E] hover:underline cursor-pointer"
+                        >
+                          <span>Remover Imagem</span>
+                        </button>
+                      )}
+                      {sf.heroSlides.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const filtered = sf.heroSlides
+                              .filter((_, i) => i !== idx)
+                              .map((item, i) => ({
+                                ...item,
+                                index: String(i + 1).padStart(2, '0'),
+                              }));
+                            setSf({ ...sf, heroSlides: filtered });
+                          }}
+                          className="inline-flex items-center gap-1 text-[11px] text-red-700 hover:underline cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Remover Slide</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   <div>
@@ -724,6 +739,7 @@ export const AdminSettings: React.FC = () => {
                     label="Fotografia do Banner"
                     recommendedSize="900 × 1050 px (vertical 4:5 · mín. 700 × 820 px)"
                     value={slide.image}
+                    allowEmpty
                     onChange={(url) => {
                       const next = [...sf.heroSlides];
                       next[idx] = { ...next[idx], image: url };

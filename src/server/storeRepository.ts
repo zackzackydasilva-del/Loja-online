@@ -1544,12 +1544,11 @@ export async function updateProductInStore(id: string, updates: Partial<Product>
           image: await persistImageAsset(supabase, v.image, 'products'),
         }))
       );
-      rowUpdates.colors =
-        persistedVariants.length > 0
-          ? persistedVariants
-          : updates.colors && updates.colors.length > 0
-          ? updates.colors
-          : ['Neutro'];
+      if (persistedVariants.length > 0) {
+        rowUpdates.colors = persistedVariants;
+      } else if (updates.colors !== undefined) {
+        rowUpdates.colors = updates.colors.length > 0 ? updates.colors : ['Neutro'];
+      }
     } else if (updates.colors !== undefined) {
       rowUpdates.colors = updates.colors;
     }
