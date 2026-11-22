@@ -212,7 +212,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const fetchPublicStore = useCallback(async () => {
     try {
-      const res = await fetch('/api/store');
+      const res = await fetch('/api/store', { cache: 'no-store' });
       if (!res.ok) return;
       const data = await res.json();
       if (Array.isArray(data.products)) {
@@ -228,6 +228,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const fetchAdminBundle = useCallback(async (token: string) => {
     const res = await fetch('/api/admin/dashboard', {
+      cache: 'no-store',
       headers: { Authorization: `Bearer ${token}` },
     });
     if (res.status === 401) {
@@ -248,18 +249,34 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (Array.isArray(data.costs)) setCosts(data.costs);
     if (data.settings) setSettings(data.settings);
     if (Array.isArray(data.newsletterEmails)) setNewsletterEmails(data.newsletterEmails);
-  }, []);
+  }, [setAdminToken]);
 
   useEffect(() => {
-    if (activeAppView === 'storefront') {
-      fetchPublicStore();
-    }
+    if (activeAppView !== 'storefront') return;
+
+    fetchPublicStore();
+
+    const syncIfVisible = () => {
+      if (document.visibilityState === 'visible') {
+        fetchPublicStore();
+      }
+    };
+
+    window.addEventListener('focus', syncIfVisible);
+    document.addEventListener('visibilitychange', syncIfVisible);
+    const intervalId = window.setInterval(syncIfVisible, 30_000);
+
+    return () => {
+      window.removeEventListener('focus', syncIfVisible);
+      document.removeEventListener('visibilitychange', syncIfVisible);
+      window.clearInterval(intervalId);
+    };
   }, [activeAppView, fetchPublicStore]);
 
   useEffect(() => {
     if (activeAppView !== 'admin') return;
 
-    fetch('/api/admin/auth/status')
+    fetch('/api/admin/auth/status', { cache: 'no-store' })
       .then((r) => r.json())
       .then((data) => {
         setAdminManagedByEnv(Boolean(data.managedByEnv));

@@ -130,13 +130,24 @@ function requireAdminAuth(req: Request, res: Response, next: NextFunction) {
 }
 
 // Public Health & Storefront Routes
+app.use('/api', (_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+  res.setHeader('CDN-Cache-Control', 'no-store');
+  res.setHeader('Vercel-CDN-Cache-Control', 'no-store');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  next();
+});
+
 app.get('/api/health', async (_req, res) => {
   const status = await checkSupabaseTablesStatus();
   res.json({
     ok: true,
+    persistence: status.configured && status.tablesReady ? 'supabase' : 'memory',
     supabaseConfigured: status.configured,
     tablesReady: status.tablesReady,
     productCount: status.productCount,
+    seedStage: status.seedStage,
     runtime: process.env.VERCEL ? 'vercel' : 'node',
   });
 });

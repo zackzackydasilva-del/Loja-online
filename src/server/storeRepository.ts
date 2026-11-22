@@ -192,9 +192,11 @@ function getCleanedSupabaseEnv() {
 
   const key = (
     process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SERVICE_KEY ||
     process.env.SUPABASE_KEY ||
     process.env.SUPABASE_ANON_KEY ||
     process.env.VITE_SUPABASE_ANON_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
     ''
   )
     .trim()
@@ -211,6 +213,9 @@ function getSupabaseClient(): SupabaseClient | null {
   if (!cachedClient) {
     cachedClient = createClient(url, key, {
       auth: { persistSession: false, autoRefreshToken: false },
+      global: {
+        fetch: (input, init) => fetch(input, { ...init, cache: 'no-store' }),
+      },
     });
   }
   return cachedClient;
@@ -378,17 +383,16 @@ async function ensureSupabaseSeeded(supabase: SupabaseClient): Promise<boolean> 
     lastSupabaseError = undefined;
     lastSeedStage = 'checking_products';
     try {
-      let [prodCheck, settingsCheck, orderItemsCheck] = await Promise.all([
+      let [prodCheck, settingsCheck] = await Promise.all([
         supabase.from('products').select('id', { count: 'exact' }).limit(1),
         supabase.from('store_settings').select('id, currency_symbol').limit(1),
-        supabase.from('order_items').select('id').limit(1),
       ]);
 
       const { url, key } = getCleanedSupabaseEnv();
       const urlRefMatch = url?.match(/^https?:\/\/([a-z0-9-]+)\.supabase\.co/i);
       const projectRef = urlRefMatch?.[1] || extractProjectRefFromJwt(key);
 
-      let schemaError = prodCheck.error || settingsCheck.error || orderItemsCheck.error;
+      let schemaError = prodCheck.error || settingsCheck.error;
 
       if (schemaError) {
         lastSeedStage = `schema_probe_error:${schemaError.code || 'ERR'}`;
@@ -397,12 +401,11 @@ async function ensureSupabaseSeeded(supabase: SupabaseClient): Promise<boolean> 
           const created = await bootstrapSupabaseSchemaIfMissing(projectRef);
           if (created) {
             await new Promise((r) => setTimeout(r, 1500));
-            [prodCheck, settingsCheck, orderItemsCheck] = await Promise.all([
+            [prodCheck, settingsCheck] = await Promise.all([
               supabase.from('products').select('id', { count: 'exact' }).limit(1),
               supabase.from('store_settings').select('id, currency_symbol').limit(1),
-              supabase.from('order_items').select('id').limit(1),
             ]);
-            schemaError = prodCheck.error || settingsCheck.error || orderItemsCheck.error;
+            schemaError = prodCheck.error || settingsCheck.error;
           }
         } else {
           lastSeedStage = `missing_project_ref:url_prefix=${url ? url.slice(0, 8) : 'none'}:key_jwt=${key.startsWith('eyJ')}`;
@@ -489,95 +492,86 @@ async function ensureSupabaseSeeded(supabase: SupabaseClient): Promise<boolean> 
         ).catch(() => false);
       }
 
-      const catRes = await supabase.from('categories').upsert(CATEGORIES_SEED, { onConflict: 'slug' });
-      if (catRes.error) {
-        lastSupabaseError = `categories: ${catRes.error.message}`;
-        lastSeedStage = `categories_upsert_error:${catRes.error.code || 'ERR'}`;
-        lastSeedFailureAt = Date.now();
-        return false;
-      }
-
-      // One-time cleanup of initial demo records so the management panel starts completely clean
-      const { data: legacyProdCheck } = await supabase
-        .from('products')
-        .select('id')
-        .in('id', LEGACY_DEMO_PRODUCT_IDS)
-        .limit(1);
-      const { data: legacyOrderCheck } = await supabase
-        .from('orders')
-        .select('id')
-        .in('id', LEGACY_DEMO_ORDER_IDS)
-        .limit(1);
-      const { data: legacyGoalCheck } = await supabase
-        .from('goals')
-        .select('id')
-        .in('id', LEGACY_DEMO_GOAL_IDS)
-        .limit(1);
-
-      if (
-        (legacyProdCheck && legacyProdCheck.length > 0) ||
-        (legacyOrderCheck && legacyOrderCheck.length > 0) ||
-        (legacyGoalCheck && legacyGoalCheck.length > 0)
-      ) {
-        await supabase.from('stock_movements').delete().in('product_id', LEGACY_DEMO_PRODUCT_IDS);
-        await supabase.from('order_items').delete().in('order_id', LEGACY_DEMO_ORDER_IDS);
-        await supabase.from('tasks').delete().in('id', LEGACY_DEMO_TASK_IDS);
-        await supabase.from('orders').delete().in('id', LEGACY_DEMO_ORDER_IDS);
-        await supabase.from('products').delete().in('id', LEGACY_DEMO_PRODUCT_IDS);
-        await supabase.from('customers').delete().in('email', LEGACY_DEMO_CUSTOMER_EMAILS);
-        await supabase.from('goals').delete().in('id', LEGACY_DEMO_GOAL_IDS);
-        await supabase.from('campaigns').delete().in('id', LEGACY_DEMO_CAMPAIGN_IDS);
-        await supabase.from('newsletter_subscribers').delete().in('email', LEGACY_DEMO_CUSTOMER_EMAILS);
-      }
-
-      // Ensure weekly_sales rows exist (initialized at 0, or zeroed if legacy demo numbers remain without real orders)
-      const { data: existingWeekly } = await supabase
-        .from('weekly_sales')
-        .select('day_index, apparel');
-      const { count: realOrdersCount } = await supabase
-        .from('orders')
-        .select('id', { count: 'exact', head: true });
-      const hasDemoSales =
-        (realOrdersCount ?? 0) === 0 &&
-        existingWeekly?.some((w) => w.day_index === 0 && Number(w.apparel) === 1420);
-
-      if (!existingWeekly || existingWeekly.length === 0 || hasDemoSales) {
-        await supabase.from('weekly_sales').upsert(
-          WEEKLY_SALES_DATA.map((w, idx) => ({
-            day_index: idx,
-            day: w.day,
-            full_day: w.fullDay,
-            apparel: w.apparel,
-            accessories: w.accessories,
-            delta_percent: w.deltaPercent,
-          }))
-        );
-      }
-
-      if (!settingsCheck.data || settingsCheck.data.length === 0) {
-        const baseSettings: Record<string, unknown> = {
-          id: 1,
-          store_name: INITIAL_SETTINGS.storeName,
-          currency_symbol: INITIAL_SETTINGS.currencySymbol,
-          free_shipping_threshold: INITIAL_SETTINGS.freeShippingThreshold,
-          support_email: INITIAL_SETTINGS.supportEmail,
-          integrations: INITIAL_SETTINGS.integrations,
-        };
-        if (hasStorefrontConfigCol) {
-          baseSettings.storefront_config = INITIAL_SETTINGS.storefrontConfig;
+      // Best-effort secondary seed/cleanup steps — never block reading products or settings if non-fatal
+      try {
+        const catRes = await supabase.from('categories').upsert(CATEGORIES_SEED, { onConflict: 'slug' });
+        if (catRes.error) {
+          console.warn('Supabase categories seed warning:', catRes.error.message);
         }
-        await supabase.from('store_settings').upsert(baseSettings);
-      } else if (settingsCheck.data[0]?.currency_symbol === '€') {
-        const patch: Record<string, unknown> = {
-          currency_symbol: 'Kz',
-          free_shipping_threshold: 50000,
-          support_email: 'atelier@lunorafashion.ao',
-          integrations: [],
-        };
-        if (hasStorefrontConfigCol) {
-          patch.storefront_config = DEFAULT_STOREFRONT_CONFIG;
+
+        const [{ data: legacyProdCheck }, { data: legacyOrderCheck }, { data: legacyGoalCheck }] =
+          await Promise.all([
+            supabase.from('products').select('id').in('id', LEGACY_DEMO_PRODUCT_IDS).limit(1),
+            supabase.from('orders').select('id').in('id', LEGACY_DEMO_ORDER_IDS).limit(1),
+            supabase.from('goals').select('id').in('id', LEGACY_DEMO_GOAL_IDS).limit(1),
+          ]);
+
+        if (
+          (legacyProdCheck && legacyProdCheck.length > 0) ||
+          (legacyOrderCheck && legacyOrderCheck.length > 0) ||
+          (legacyGoalCheck && legacyGoalCheck.length > 0)
+        ) {
+          await supabase.from('stock_movements').delete().in('product_id', LEGACY_DEMO_PRODUCT_IDS);
+          await supabase.from('order_items').delete().in('order_id', LEGACY_DEMO_ORDER_IDS);
+          await supabase.from('tasks').delete().in('id', LEGACY_DEMO_TASK_IDS);
+          await supabase.from('orders').delete().in('id', LEGACY_DEMO_ORDER_IDS);
+          await supabase.from('products').delete().in('id', LEGACY_DEMO_PRODUCT_IDS);
+          await supabase.from('customers').delete().in('email', LEGACY_DEMO_CUSTOMER_EMAILS);
+          await supabase.from('goals').delete().in('id', LEGACY_DEMO_GOAL_IDS);
+          await supabase.from('campaigns').delete().in('id', LEGACY_DEMO_CAMPAIGN_IDS);
+          await supabase.from('newsletter_subscribers').delete().in('email', LEGACY_DEMO_CUSTOMER_EMAILS);
         }
-        await supabase.from('store_settings').update(patch).eq('id', 1);
+
+        const { data: existingWeekly } = await supabase
+          .from('weekly_sales')
+          .select('day_index, apparel');
+        const { count: realOrdersCount } = await supabase
+          .from('orders')
+          .select('id', { count: 'exact', head: true });
+        const hasDemoSales =
+          (realOrdersCount ?? 0) === 0 &&
+          existingWeekly?.some((w) => w.day_index === 0 && Number(w.apparel) === 1420);
+
+        if (!existingWeekly || existingWeekly.length === 0 || hasDemoSales) {
+          await supabase.from('weekly_sales').upsert(
+            WEEKLY_SALES_DATA.map((w, idx) => ({
+              day_index: idx,
+              day: w.day,
+              full_day: w.fullDay,
+              apparel: w.apparel,
+              accessories: w.accessories,
+              delta_percent: w.deltaPercent,
+            }))
+          );
+        }
+
+        if (!settingsCheck.data || settingsCheck.data.length === 0) {
+          const baseSettings: Record<string, unknown> = {
+            id: 1,
+            store_name: INITIAL_SETTINGS.storeName,
+            currency_symbol: INITIAL_SETTINGS.currencySymbol,
+            free_shipping_threshold: INITIAL_SETTINGS.freeShippingThreshold,
+            support_email: INITIAL_SETTINGS.supportEmail,
+            integrations: INITIAL_SETTINGS.integrations,
+          };
+          if (hasStorefrontConfigCol) {
+            baseSettings.storefront_config = INITIAL_SETTINGS.storefrontConfig;
+          }
+          await supabase.from('store_settings').upsert(baseSettings);
+        } else if (settingsCheck.data[0]?.currency_symbol === '€') {
+          const patch: Record<string, unknown> = {
+            currency_symbol: 'Kz',
+            free_shipping_threshold: 50000,
+            support_email: 'atelier@lunorafashion.ao',
+            integrations: [],
+          };
+          if (hasStorefrontConfigCol) {
+            patch.storefront_config = DEFAULT_STOREFRONT_CONFIG;
+          }
+          await supabase.from('store_settings').update(patch).eq('id', 1);
+        }
+      } catch (seedWarn) {
+        console.warn('Supabase non-fatal seed warning:', seedWarn);
       }
 
       lastSeedStage = 'ready';
@@ -605,14 +599,23 @@ export async function getPublicStoreData(): Promise<{
   persistence: 'supabase' | 'memory';
 }> {
   const supabase = getSupabaseClient();
-  if (supabase && (await ensureSupabaseSeeded(supabase))) {
+  if (supabase) {
+    await ensureSupabaseSeeded(supabase).catch(() => false);
     const settingsCols = hasStorefrontConfigCol
       ? 'store_name, currency_symbol, free_shipping_threshold, support_email, storefront_config'
       : 'store_name, currency_symbol, free_shipping_threshold, support_email';
-    const [prodRes, setRes] = await Promise.all([
+    let [prodRes, setRes] = await Promise.all([
       supabase.from('products').select('*').order('created_at', { ascending: false }),
       supabase.from('store_settings').select(settingsCols).eq('id', 1).maybeSingle(),
     ]);
+
+    if (setRes.error && hasStorefrontConfigCol) {
+      setRes = await supabase
+        .from('store_settings')
+        .select('store_name, currency_symbol, free_shipping_threshold, support_email')
+        .eq('id', 1)
+        .maybeSingle();
+    }
 
     if (!prodRes.error && prodRes.data) {
       const settingsRow = setRes.data as Record<string, unknown> | null;
@@ -624,9 +627,10 @@ export async function getPublicStoreData(): Promise<{
               currencySymbol: String(settingsRow.currency_symbol),
               freeShippingThreshold: Number(settingsRow.free_shipping_threshold),
               supportEmail: String(settingsRow.support_email),
-              storefrontConfig: hasStorefrontConfigCol
-                ? mergeStorefrontConfig(settingsRow.storefront_config)
-                : memoryStore.settings.storefrontConfig,
+              storefrontConfig:
+                'storefront_config' in settingsRow && settingsRow.storefront_config
+                  ? mergeStorefrontConfig(settingsRow.storefront_config)
+                  : memoryStore.settings.storefrontConfig,
             }
           : {
               storeName: memoryStore.settings.storeName,
@@ -655,7 +659,8 @@ export async function getPublicStoreData(): Promise<{
 
 export async function getAdminBundle() {
   const supabase = getSupabaseClient();
-  if (supabase && (await ensureSupabaseSeeded(supabase))) {
+  if (supabase) {
+    await ensureSupabaseSeeded(supabase).catch(() => false);
     const [prodRes, ordRes, itemRes, custRes, movRes, goalRes, taskRes, campRes, salesRes, setRes, newsRes, costRes] =
       await Promise.all([
         supabase.from('products').select('*').order('created_at', { ascending: false }),
@@ -852,7 +857,8 @@ export async function createOrderInStore(input: {
   const taskTitle = `Preparar encomenda #${orderId} (${newOrder.customerName})`;
 
   const supabase = getSupabaseClient();
-  if (supabase && (await ensureSupabaseSeeded(supabase))) {
+  if (supabase) {
+    await ensureSupabaseSeeded(supabase).catch(() => false);
     // 1. Upsert relational customer record
     const customerId = `cust-${Date.now()}`;
     const { data: existingCust } = await supabase
@@ -1109,7 +1115,8 @@ export async function createManualOrderInStore(input: {
   const activeTask = status !== 'Entregue';
 
   const supabase = getSupabaseClient();
-  if (supabase && (await ensureSupabaseSeeded(supabase))) {
+  if (supabase) {
+    await ensureSupabaseSeeded(supabase).catch(() => false);
     const customerId = `cust-${Date.now()}`;
     const { data: existingCust } = await supabase
       .from('customers')
@@ -1277,7 +1284,8 @@ export async function updateOrderStatusInStore(orderId: string, status: OrderSta
   const progressStep = stepMap[status] ?? 1;
 
   const supabase = getSupabaseClient();
-  if (supabase && (await ensureSupabaseSeeded(supabase))) {
+  if (supabase) {
+    await ensureSupabaseSeeded(supabase).catch(() => false);
     const { data: existingOrder } = await supabase
       .from('orders')
       .select('status, total')
@@ -1351,15 +1359,19 @@ export async function createProductInStore(
   };
 
   const supabase = getSupabaseClient();
-  if (supabase && (await ensureSupabaseSeeded(supabase))) {
-    // Ensure category exists in categories table before foreign key insert
+  if (supabase) {
+    await ensureSupabaseSeeded(supabase).catch(() => false);
+    const slug = created.category
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
     await supabase.from('categories').upsert(
       {
-        slug: created.category.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''),
+        slug,
         name: created.category,
         sort_order: 9,
       },
-      { onConflict: 'name' }
+      { onConflict: 'slug' }
     );
 
     const { error } = await supabase.from('products').insert(mapProductToRow(created));
@@ -1367,7 +1379,7 @@ export async function createProductInStore(
       if (error.code === '23505') {
         throw new Error(`Já existe um produto registado com o SKU ${created.sku}.`);
       }
-      throw new Error('Não foi possível registar o produto na base de dados.');
+      throw new Error(`Não foi possível registar o produto na base de dados (${error.message}).`);
     }
 
     await supabase.from('stock_movements').insert({
@@ -1397,7 +1409,8 @@ export async function createProductInStore(
 
 export async function updateProductInStore(id: string, updates: Partial<Product>) {
   const supabase = getSupabaseClient();
-  if (supabase && (await ensureSupabaseSeeded(supabase))) {
+  if (supabase) {
+    await ensureSupabaseSeeded(supabase).catch(() => false);
     const { data: existing } = await supabase
       .from('products')
       .select('stock')
@@ -1411,7 +1424,7 @@ export async function updateProductInStore(id: string, updates: Partial<Product>
           name: updates.category,
           sort_order: 9,
         },
-        { onConflict: 'name' }
+        { onConflict: 'slug' }
       );
     }
 
@@ -1475,7 +1488,8 @@ export async function updateProductInStore(id: string, updates: Partial<Product>
 
 export async function deleteProductInStore(id: string) {
   const supabase = getSupabaseClient();
-  if (supabase && (await ensureSupabaseSeeded(supabase))) {
+  if (supabase) {
+    await ensureSupabaseSeeded(supabase).catch(() => false);
     await supabase.from('products').delete().eq('id', id);
     return;
   }
@@ -1484,7 +1498,8 @@ export async function deleteProductInStore(id: string) {
 
 export async function toggleGoalInStore(id: string, completed: boolean) {
   const supabase = getSupabaseClient();
-  if (supabase && (await ensureSupabaseSeeded(supabase))) {
+  if (supabase) {
+    await ensureSupabaseSeeded(supabase).catch(() => false);
     await supabase.from('goals').update({ completed }).eq('id', id);
     return;
   }
@@ -1496,7 +1511,8 @@ export async function toggleGoalInStore(id: string, completed: boolean) {
 export async function addGoalInStore(title: string): Promise<StoreGoal> {
   const goal: StoreGoal = { id: `goal-${Date.now()}`, title, completed: false };
   const supabase = getSupabaseClient();
-  if (supabase && (await ensureSupabaseSeeded(supabase))) {
+  if (supabase) {
+    await ensureSupabaseSeeded(supabase).catch(() => false);
     await supabase.from('goals').insert(goal);
     return goal;
   }
@@ -1518,7 +1534,8 @@ export async function addTaskInStore(
     notify: true,
   };
   const supabase = getSupabaseClient();
-  if (supabase && (await ensureSupabaseSeeded(supabase))) {
+  if (supabase) {
+    await ensureSupabaseSeeded(supabase).catch(() => false);
     await supabase.from('tasks').insert({
       id: task.id,
       title: task.title,
@@ -1535,7 +1552,8 @@ export async function addTaskInStore(
 
 export async function updateTaskInStore(id: string, updates: Partial<StoreTask>) {
   const supabase = getSupabaseClient();
-  if (supabase && (await ensureSupabaseSeeded(supabase))) {
+  if (supabase) {
+    await ensureSupabaseSeeded(supabase).catch(() => false);
     const rowUpdates: Record<string, unknown> = {};
     if (updates.title !== undefined) rowUpdates.title = updates.title;
     if (updates.dueDate !== undefined) rowUpdates.due_date = updates.dueDate;
@@ -1551,7 +1569,8 @@ export async function updateTaskInStore(id: string, updates: Partial<StoreTask>)
 
 export async function deleteTaskInStore(id: string) {
   const supabase = getSupabaseClient();
-  if (supabase && (await ensureSupabaseSeeded(supabase))) {
+  if (supabase) {
+    await ensureSupabaseSeeded(supabase).catch(() => false);
     await supabase.from('tasks').delete().eq('id', id);
     return;
   }
@@ -1563,7 +1582,8 @@ export async function updateSettingsInStore(updates: Partial<StoreSettings>) {
     memoryStore.settings.storefrontConfig = mergeStorefrontConfig(updates.storefrontConfig);
   }
   const supabase = getSupabaseClient();
-  if (supabase && (await ensureSupabaseSeeded(supabase))) {
+  if (supabase) {
+    await ensureSupabaseSeeded(supabase).catch(() => false);
     const rowUpdates: Record<string, unknown> = {};
     if (updates.storeName !== undefined) rowUpdates.store_name = updates.storeName;
     if (updates.currencySymbol !== undefined) rowUpdates.currency_symbol = updates.currencySymbol;
@@ -1576,9 +1596,31 @@ export async function updateSettingsInStore(updates: Partial<StoreSettings>) {
       rowUpdates.storefront_config = mergeStorefrontConfig(updates.storefrontConfig);
     }
     if (Object.keys(rowUpdates).length > 0) {
-      const { error } = await supabase.from('store_settings').update(rowUpdates).eq('id', 1);
+      const { data, error } = await supabase
+        .from('store_settings')
+        .update(rowUpdates)
+        .eq('id', 1)
+        .select('id');
       if (error) {
-        throw new Error('Não foi possível guardar as definições no Supabase.');
+        throw new Error(`Não foi possível guardar as definições no Supabase (${error.message}).`);
+      }
+      if (!data || data.length === 0) {
+        const upsertPayload: Record<string, unknown> = {
+          id: 1,
+          store_name: updates.storeName ?? INITIAL_SETTINGS.storeName,
+          currency_symbol: updates.currencySymbol ?? INITIAL_SETTINGS.currencySymbol,
+          free_shipping_threshold:
+            updates.freeShippingThreshold ?? INITIAL_SETTINGS.freeShippingThreshold,
+          support_email: updates.supportEmail ?? INITIAL_SETTINGS.supportEmail,
+          integrations: updates.integrations ?? INITIAL_SETTINGS.integrations,
+          ...rowUpdates,
+        };
+        const { error: upsertErr } = await supabase
+          .from('store_settings')
+          .upsert(upsertPayload, { onConflict: 'id' });
+        if (upsertErr) {
+          throw new Error(`Não foi possível guardar as definições no Supabase (${upsertErr.message}).`);
+        }
       }
     }
     return;
@@ -1595,7 +1637,8 @@ export async function updateSettingsInStore(updates: Partial<StoreSettings>) {
 export async function subscribeNewsletterInStore(email: string) {
   const clean = email.trim().toLowerCase();
   const supabase = getSupabaseClient();
-  if (supabase && (await ensureSupabaseSeeded(supabase))) {
+  if (supabase) {
+    await ensureSupabaseSeeded(supabase).catch(() => false);
     const { data: cust } = await supabase
       .from('customers')
       .select('id')
@@ -1614,7 +1657,8 @@ export async function subscribeNewsletterInStore(email: string) {
 
 export async function getAdminPasswordHash(): Promise<string | null> {
   const supabase = getSupabaseClient();
-  if (supabase && (await ensureSupabaseSeeded(supabase))) {
+  if (supabase) {
+    await ensureSupabaseSeeded(supabase).catch(() => false);
     const { data } = await supabase
       .from('store_settings')
       .select('admin_password_hash')
@@ -1628,7 +1672,8 @@ export async function getAdminPasswordHash(): Promise<string | null> {
 export async function saveAdminPasswordHash(hash: string): Promise<void> {
   memoryStore.adminPasswordHash = hash;
   const supabase = getSupabaseClient();
-  if (supabase && (await ensureSupabaseSeeded(supabase))) {
+  if (supabase) {
+    await ensureSupabaseSeeded(supabase).catch(() => false);
     await supabase
       .from('store_settings')
       .update({ admin_password_hash: hash })
@@ -1651,18 +1696,21 @@ export async function addCostInStore(input: {
   };
 
   const supabase = getSupabaseClient();
-  if (supabase && (await ensureSupabaseSeeded(supabase)) && hasStoreCostsTable) {
-    const { error } = await supabase.from('store_costs').insert({
-      id: cost.id,
-      title: cost.title,
-      category: cost.category,
-      amount: cost.amount,
-      cost_date: cost.date,
-    });
-    if (error) {
-      throw new Error('Falha ao registar custo na base de dados.');
+  if (supabase) {
+    await ensureSupabaseSeeded(supabase).catch(() => false);
+    if (hasStoreCostsTable) {
+      const { error } = await supabase.from('store_costs').insert({
+        id: cost.id,
+        title: cost.title,
+        category: cost.category,
+        amount: cost.amount,
+        cost_date: cost.date,
+      });
+      if (error) {
+        throw new Error('Falha ao registar custo na base de dados.');
+      }
+      return cost;
     }
-    return cost;
   }
 
   memoryStore.costs = [cost, ...memoryStore.costs];
@@ -1671,8 +1719,11 @@ export async function addCostInStore(input: {
 
 export async function deleteCostInStore(id: string) {
   const supabase = getSupabaseClient();
-  if (supabase && (await ensureSupabaseSeeded(supabase)) && hasStoreCostsTable) {
-    await supabase.from('store_costs').delete().eq('id', id);
+  if (supabase) {
+    await ensureSupabaseSeeded(supabase).catch(() => false);
+    if (hasStoreCostsTable) {
+      await supabase.from('store_costs').delete().eq('id', id);
+    }
   }
   memoryStore.costs = memoryStore.costs.filter((c) => c.id !== id);
 }
@@ -1690,7 +1741,8 @@ export async function resetDemoDataInStore() {
   memoryStore.weeklySales = structuredClone(WEEKLY_SALES_DATA);
 
   const supabase = getSupabaseClient();
-  if (supabase && (await ensureSupabaseSeeded(supabase))) {
+  if (supabase) {
+    await ensureSupabaseSeeded(supabase).catch(() => false);
     await supabase.from('stock_movements').delete().neq('id', '');
     await supabase.from('order_items').delete().neq('id', '');
     await supabase.from('tasks').delete().neq('id', '');
