@@ -1,4 +1,4 @@
-import {
+import type {
   Product,
   StoreOrder,
   StoreGoal,
@@ -7,7 +7,7 @@ import {
   WeeklySalesPoint,
   StoreSettings,
   StorefrontConfig,
-} from '../types/store';
+} from '../types/store.ts';
 
 export const ASSETS = {
   heroWoman: '/src/assets/images/hero_editorial_woman_1795267588559.jpg',
@@ -44,6 +44,7 @@ export const WEEKLY_SALES_DATA: WeeklySalesPoint[] = [
 ];
 
 export const DEFAULT_STOREFRONT_CONFIG: StorefrontConfig = {
+  topNoticeText: 'Pagamento feito apenas na entrega · Pague apenas quando receber a sua encomenda',
   headerWordmark: 'LUNORA',
   navLabels: {
     collections: 'Coleções',

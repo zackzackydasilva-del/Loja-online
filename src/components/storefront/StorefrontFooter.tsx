@@ -8,7 +8,7 @@ interface StorefrontFooterProps {
 }
 
 export const StorefrontFooter: React.FC<StorefrontFooterProps> = ({ onNavigateCategory }) => {
-  const { setActiveAppView, subscribeNewsletter, settings } = useStore();
+  const { subscribeNewsletter, settings } = useStore();
   const [email, setEmail] = useState('');
   const [done, setDone] = useState(false);
 
@@ -25,110 +25,61 @@ export const StorefrontFooter: React.FC<StorefrontFooterProps> = ({ onNavigateCa
   };
 
   return (
-    <footer className="bg-[#121210] text-[#E8E3DA] pt-14 pb-10">
-      <div className="max-w-[1280px] mx-auto px-6 md:px-10">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-10 pb-12 border-b border-white/10">
-          {/* Brand */}
-          <div className="lg:col-span-3 space-y-4">
-            <p className="font-serif text-2xl tracking-[0.16em] text-white">{wordmark}</p>
-            <p className="text-xs leading-relaxed text-[#A39E94] max-w-[26ch]">{ft.tagline}</p>
-            <button
-              type="button"
-              onClick={() => setActiveAppView('admin')}
-              className="inline-flex items-center gap-2 text-xs font-medium text-white underline underline-offset-4 decoration-white/30 hover:decoration-white cursor-pointer"
-            >
-              <span>Aceder ao Painel de Gestão</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
+    <footer className="bg-white border-t border-black/[0.06] pt-10 pb-24 md:pb-10 text-[#111111]">
+      <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-8 pb-8 border-b border-black/[0.06]">
+          <div className="md:col-span-5 space-y-2.5">
+            <p className="font-serif text-xl tracking-[0.14em] font-semibold">{wordmark}</p>
+            <p className="text-xs leading-relaxed text-[#666666] max-w-sm">{ft.tagline}</p>
           </div>
 
-          {/* Loja */}
-          <div className="lg:col-span-2 space-y-3">
-            <h4 className="text-xs font-semibold tracking-[0.12em] text-white uppercase">Loja</h4>
-            <ul className="space-y-2 text-xs text-[#A39E94]">
-              <li>
-                <button type="button" onClick={() => onNavigateCategory('Todos')} className="hover:text-white cursor-pointer">
-                  Todos os Produtos
+          <div className="md:col-span-3 space-y-2">
+            <p className="text-xs font-semibold text-[#111111]">Categorias</p>
+            <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-[#666666]">
+              {(['Todos', 'Mulher', 'Homem', 'Vestidos', 'Malas', 'Saldos'] as const).map((cat) => (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => onNavigateCategory(cat)}
+                  className="hover:text-[#111111] cursor-pointer"
+                >
+                  {cat}
                 </button>
-              </li>
-              <li>
-                <button type="button" onClick={() => onNavigateCategory('Mulher')} className="hover:text-white cursor-pointer">
-                  Coleção Mulher
-                </button>
-              </li>
-              <li>
-                <button type="button" onClick={() => onNavigateCategory('Homem')} className="hover:text-white cursor-pointer">
-                  Coleção Homem
-                </button>
-              </li>
-              <li>
-                <button type="button" onClick={() => onNavigateCategory('Malas')} className="hover:text-white cursor-pointer">
-                  Malas & Acessórios
-                </button>
-              </li>
-              <li>
-                <button type="button" onClick={() => onNavigateCategory('Saldos')} className="hover:text-white cursor-pointer">
-                  Saldos
-                </button>
-              </li>
-            </ul>
-          </div>
-
-          {/* Apoio ao Cliente */}
-          <div className="lg:col-span-2 space-y-3">
-            <h4 className="text-xs font-semibold tracking-[0.12em] text-white uppercase">
-              {ft.supportTitle}
-            </h4>
-            <ul className="space-y-2 text-xs text-[#A39E94]">
-              {ft.supportLinks.map((item, idx) => (
-                <li key={idx}>{item}</li>
               ))}
-            </ul>
+            </div>
           </div>
 
-          {/* Atelier */}
-          <div className="lg:col-span-2 space-y-3">
-            <h4 className="text-xs font-semibold tracking-[0.12em] text-white uppercase">
-              {ft.atelierTitle}
-            </h4>
-            <ul className="space-y-2 text-xs text-[#A39E94]">
-              {ft.atelierLinks.map((item, idx) => (
-                <li key={idx}>{item}</li>
-              ))}
-            </ul>
-          </div>
-
-          {/* Newsletter */}
-          <div className="lg:col-span-3 space-y-3">
-            <h4 className="text-xs font-semibold tracking-[0.12em] text-white uppercase">
-              {ft.newsletterTitle}
-            </h4>
-            <p className="text-xs text-[#A39E94]">{ft.newsletterDescription}</p>
+          <div className="md:col-span-4 space-y-2.5">
+            <p className="text-xs font-semibold text-[#111111]">{ft.newsletterTitle}</p>
+            <p className="text-xs text-[#666666]">{ft.newsletterDescription}</p>
             {done ? (
-              <p className="text-xs text-white font-medium">Obrigado pela sua subscrição.</p>
+              <p className="text-xs font-medium text-[#111111]">Obrigado pela sua subscrição.</p>
             ) : (
-              <form onSubmit={handleSubscribe} className="flex items-center bg-white rounded-lg overflow-hidden">
+              <form
+                onSubmit={handleSubscribe}
+                className="flex items-center bg-[#F3F3F3] rounded-full overflow-hidden p-1"
+              >
                 <input
                   type="email"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="O seu email"
-                  className="flex-1 px-3.5 py-2.5 text-xs text-[#141413] placeholder:text-[#8A857C] focus:outline-none"
+                  className="flex-1 bg-transparent px-3.5 py-1.5 text-xs text-[#111111] placeholder:text-[#888888] focus:outline-none"
                 />
                 <button
                   type="submit"
                   aria-label="Subscrever"
-                  className="px-3.5 py-2.5 text-[#141413] hover:bg-[#EFECE5] transition-colors cursor-pointer"
+                  className="w-8 h-8 rounded-full bg-[#111111] text-white flex items-center justify-center hover:bg-[#2C2C2C] transition-colors cursor-pointer shrink-0"
                 >
-                  <ArrowRight className="w-4 h-4" />
+                  <ArrowRight className="w-3.5 h-3.5" />
                 </button>
               </form>
             )}
           </div>
         </div>
 
-        <div className="pt-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px] text-[#8A857C]">
+        <div className="pt-5 flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px] text-[#777777]">
           <p>{ft.copyrightText}</p>
           <p>{ft.locationText}</p>
         </div>

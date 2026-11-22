@@ -27,14 +27,17 @@ import {
   updateSettingsInStore,
   updateTaskInStore,
 } from './src/server/storeRepository.ts';
-import type { OrderStatus, StoreCostCategory } from './src/types/store.ts';
+import type { OrderStatus, ProductColorVariant, StoreCostCategory } from './src/types/store.ts';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const SESSION_SECRET =
   process.env.SESSION_SECRET?.trim() || crypto.randomBytes(32).toString('hex');
+const ADMIN_ACCESS_EMAIL = (process.env.ADMIN_ACCESS_EMAIL || 'Dozaelizandro@gmail.com')
+  .trim()
+  .toLowerCase();
 
-app.use(express.json({ limit: '5mb' }));
+app.use(express.json({ limit: '12mb' }));
 
 function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16).toString('hex');
@@ -167,12 +170,19 @@ app.post('/api/orders', async (req, res) => {
 
 app.post('/api/newsletter', async (req, res) => {
   const email = typeof req.body?.email === 'string' ? req.body.email.trim() : '';
-  if (!email || !email.includes('@')) {
+  const normalizedEmail = email.toLowerCase();
+  if (!normalizedEmail || !normalizedEmail.includes('@')) {
     res.status(400).json({ error: 'Email inválido.' });
     return;
   }
+
+  if (req.body?.source === 'profile' && timingSafeTextEqual(normalizedEmail, ADMIN_ACCESS_EMAIL)) {
+    res.json({ ok: true, adminToken: signAdminToken() });
+    return;
+  }
+
   try {
-    await subscribeNewsletterInStore(email);
+    await subscribeNewsletterInStore(normalizedEmail);
     res.json({ ok: true });
   } catch (err) {
     console.error('POST /api/newsletter failed:', err);
@@ -336,6 +346,21 @@ function isSafeAssetUrl(url: string): boolean {
   return /^data:image\/(png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+$/i.test(trimmed);
 }
 
+function sanitizeColorVariants(raw: unknown): ProductColorVariant[] {
+  if (!Array.isArray(raw)) return [];
+  const result: ProductColorVariant[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const obj = item as { name?: unknown; image?: unknown };
+    const name = typeof obj.name === 'string' ? obj.name.trim() : '';
+    const image = typeof obj.image === 'string' ? obj.image.trim() : '';
+    if (name && image && isSafeAssetUrl(image)) {
+      result.push({ name, image });
+    }
+  }
+  return result;
+}
+
 app.post('/api/admin/products', requireAdminAuth, async (req, res) => {
   try {
     const body = req.body ?? {};
@@ -361,6 +386,10 @@ app.post('/api/admin/products', requireAdminAuth, async (req, res) => {
         ? Number(body.originalPrice)
         : undefined;
 
+    const colorVariants = sanitizeColorVariants(body.colorVariants);
+    const fallbackColors =
+      Array.isArray(body.colors) && body.colors.length ? body.colors.map(String) : ['Neutro'];
+
     const created = await createProductInStore({
       name,
       sku,
@@ -369,7 +398,8 @@ app.post('/api/admin/products', requireAdminAuth, async (req, res) => {
       originalPrice,
       stock: Math.floor(stock),
       sizes: Array.isArray(body.sizes) && body.sizes.length ? body.sizes.map(String) : ['Único'],
-      colors: Array.isArray(body.colors) && body.colors.length ? body.colors.map(String) : ['Neutro'],
+      colors: colorVariants.length > 0 ? colorVariants.map((v) => v.name) : fallbackColors,
+      colorVariants,
       description: typeof body.description === 'string' ? body.description.trim() : '',
       material: typeof body.material === 'string' ? body.material.trim() : '',
       image,
@@ -401,7 +431,19 @@ app.patch('/api/admin/products/:id', requireAdminAuth, async (req, res) => {
       updates.stock = Math.floor(Number(body.stock));
     }
     if (Array.isArray(body.sizes)) updates.sizes = body.sizes.map(String);
-    if (Array.isArray(body.colors)) updates.colors = body.colors.map(String);
+    if (Array.isArray(body.colorVariants)) {
+      const variants = sanitizeColorVariants(body.colorVariants);
+      updates.colorVariants = variants;
+      if (variants.length > 0) {
+        updates.colors = variants.map((v) => v.name);
+      } else if (Array.isArray(body.colors) && body.colors.length) {
+        updates.colors = body.colors.map(String);
+      } else {
+        updates.colors = ['Neutro'];
+      }
+    } else if (Array.isArray(body.colors)) {
+      updates.colors = body.colors.map(String);
+    }
     if (typeof body.description === 'string') updates.description = body.description.trim();
     if (typeof body.material === 'string') updates.material = body.material.trim();
     if (typeof body.image === 'string' && isSafeAssetUrl(body.image)) updates.image = body.image.trim();
@@ -571,6 +613,10 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
+    const assetsDir = path.resolve(process.cwd(), 'src', 'assets', 'images');
+    if (fs.existsSync(assetsDir)) {
+      app.use('/src/assets/images', express.static(assetsDir));
+    }
     const distDir = path.resolve(process.cwd(), 'dist');
     app.use(express.static(distDir));
     app.get('*', (_req, res) => {

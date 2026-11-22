@@ -15,7 +15,7 @@ export const CartDrawer: React.FC = () => {
     removeFromCart,
     placeOrder,
     settings,
-    setActiveAppView,
+    setQuickViewProduct,
   } = useStore();
 
   const [step, setStep] = useState<'cart' | 'checkout' | 'confirmed'>('cart');
@@ -31,7 +31,7 @@ export const CartDrawer: React.FC = () => {
     shippingAddress: '',
     city: '',
     postalCode: '',
-    paymentMethod: 'Multicaixa Express' as PaymentMethod,
+    paymentMethod: 'Contra-Reembolso' as PaymentMethod,
   });
 
   const [checkoutError, setCheckoutError] = useState('');
@@ -98,7 +98,7 @@ export const CartDrawer: React.FC = () => {
       onClick={resetAndClose}
     >
       <aside
-        className="w-full max-w-md bg-[#F8F6F2] h-full shadow-2xl flex flex-col"
+        className="w-full max-w-md bg-[#F7F7F7] h-full shadow-2xl flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Drawer Header */}
@@ -170,18 +170,8 @@ export const CartDrawer: React.FC = () => {
               <div className="space-y-2.5">
                 <button
                   type="button"
-                  onClick={() => {
-                    resetAndClose();
-                    setActiveAppView('admin');
-                  }}
-                  className="w-full py-3 bg-[#141413] text-[#F8F6F2] text-sm font-medium rounded-lg hover:bg-[#2B2B29] cursor-pointer"
-                >
-                  Ver Encomenda no Painel de Gestão
-                </button>
-                <button
-                  type="button"
                   onClick={resetAndClose}
-                  className="w-full py-3 bg-white text-[#141413] border border-[#141413]/15 text-sm font-medium rounded-lg hover:bg-[#EFECE5] cursor-pointer"
+                  className="w-full py-3 bg-[#141413] text-[#F8F6F2] text-sm font-medium rounded-lg hover:bg-[#2B2B29] cursor-pointer"
                 >
                   Continuar a Comprar
                 </button>
@@ -226,21 +216,35 @@ export const CartDrawer: React.FC = () => {
                     key={`${product.id}-${size}`}
                     className="flex gap-4 bg-white p-3.5 rounded-xl border border-[#141413]/8"
                   >
-                    <div className="w-20 h-24 rounded-lg overflow-hidden bg-[#F1EEE8] shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsCartOpen(false);
+                        setQuickViewProduct(product);
+                      }}
+                      className="w-20 h-24 rounded-lg overflow-hidden bg-[#F1EEE8] shrink-0 cursor-pointer"
+                    >
                       <SafeImage
                         src={product.image}
                         alt={product.name}
-                        className="w-full h-full object-cover"
+                        className="w-full h-full object-contain"
                       />
-                    </div>
+                    </button>
                     <div className="flex-1 min-w-0 flex flex-col justify-between">
                       <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <h4 className="text-sm font-semibold text-[#141413] truncate max-w-[20ch]">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsCartOpen(false);
+                            setQuickViewProduct(product);
+                          }}
+                          className="text-left cursor-pointer"
+                        >
+                          <h4 className="text-sm font-semibold text-[#141413] truncate max-w-[20ch] hover:underline">
                             {product.name}
                           </h4>
                           <p className="text-xs text-[#66635C]">Tamanho: {size}</p>
-                        </div>
+                        </button>
                         <button
                           type="button"
                           onClick={() => removeFromCart(product.id, size)}
@@ -380,10 +384,13 @@ export const CartDrawer: React.FC = () => {
 
               <div>
                 <label className="block text-xs font-medium text-[#141413] mb-1.5">
-                  Método de Pagamento
+                  Pagamento na Entrega
                 </label>
+                <p className="text-[11px] text-[#555555] bg-white border border-[#141413]/10 rounded-lg px-3 py-2 mb-2">
+                  O pagamento é feito apenas no ato da entrega (em dinheiro ou TPA/Multicaixa móvel).
+                </p>
                 <div className="grid grid-cols-3 gap-2">
-                  {(['Multicaixa Express', 'Cartão', 'Contra-Reembolso'] as const).map((method) => (
+                  {(['Contra-Reembolso', 'Multicaixa Express', 'Cartão'] as const).map((method) => (
                     <button
                       key={method}
                       type="button"
@@ -394,7 +401,7 @@ export const CartDrawer: React.FC = () => {
                           : 'bg-white text-[#141413] border-[#141413]/15'
                       }`}
                     >
-                      {method}
+                      {method === 'Contra-Reembolso' ? 'Dinheiro na Entrega' : method}
                     </button>
                   ))}
                 </div>

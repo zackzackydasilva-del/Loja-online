@@ -3,13 +3,12 @@ import { StoreProvider, useStore } from './context/StoreContext';
 import { Product, ProductCategory, StoreOrder } from './types/store';
 import { StorefrontHeader } from './components/storefront/StorefrontHeader';
 import { StorefrontHero } from './components/storefront/StorefrontHero';
-import { CategoryStrip } from './components/storefront/CategoryStrip';
-import { CollectionBento } from './components/storefront/CollectionBento';
 import { ProductGrid } from './components/storefront/ProductGrid';
-import { TrustAndNewsletter } from './components/storefront/TrustAndNewsletter';
 import { StorefrontFooter } from './components/storefront/StorefrontFooter';
+import { StorefrontBottomNav } from './components/storefront/StorefrontBottomNav';
 import { ProductDetailModal } from './components/storefront/ProductDetailModal';
 import { CartDrawer } from './components/storefront/CartDrawer';
+import { ProfileNewsletterModal } from './components/storefront/ProfileNewsletterModal';
 import { AdminLayout, AdminTab } from './components/admin/AdminLayout';
 import { AdminDashboard } from './components/admin/AdminDashboard';
 import { AdminOrders } from './components/admin/AdminOrders';
@@ -22,7 +21,7 @@ import { ManualOrderModal } from './components/admin/ManualOrderModal';
 import { AdminAuthGate } from './components/admin/AdminAuthGate';
 
 const AppContent: React.FC = () => {
-  const { activeAppView, setSelectedCategory, adminToken } = useStore();
+  const { activeAppView, setSelectedCategory, setSearchQuery, adminToken } = useStore();
   const [adminTab, setAdminTab] = useState<AdminTab>('dashboard');
   const [adminSearch, setAdminSearch] = useState('');
   const [productModalOpen, setProductModalOpen] = useState(false);
@@ -30,11 +29,20 @@ const AppContent: React.FC = () => {
   const [orderModalOpen, setOrderModalOpen] = useState(false);
   const [latestCreatedOrder, setLatestCreatedOrder] = useState<StoreOrder | null>(null);
 
+  const [storeSearchOpen, setStoreSearchOpen] = useState(false);
+  const [wishlistOnly, setWishlistOnly] = useState(false);
+  const [profileModalOpen, setProfileModalOpen] = useState(false);
+
   const navigateStoreSection = (sectionId: string, category?: ProductCategory | 'Todos') => {
+    setWishlistOnly(false);
     if (category) {
       setSelectedCategory(category);
     }
     requestAnimationFrame(() => {
+      if (sectionId === 'top') {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
       const el = document.getElementById(sectionId);
       if (el) {
         el.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -112,21 +120,67 @@ const AppContent: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#F8F6F2] text-[#141413]">
-      <StorefrontHeader onNavigateSection={navigateStoreSection} />
+    <div className="min-h-screen flex flex-col bg-white text-[#111111]">
+      <StorefrontHeader
+        onNavigateSection={navigateStoreSection}
+        searchOpen={storeSearchOpen}
+        onToggleSearch={() => setStoreSearchOpen((v) => !v)}
+        onOpenProfile={() => setProfileModalOpen(true)}
+      />
 
       <main className="flex-1">
         <StorefrontHero onShopNow={(cat) => navigateStoreSection('catalog', cat)} />
-        <CategoryStrip onSelectCategory={(cat) => navigateStoreSection('catalog', cat)} />
-        <CollectionBento onExploreCategory={(cat) => navigateStoreSection('catalog', cat)} />
-        <ProductGrid />
-        <TrustAndNewsletter />
+        <ProductGrid
+          wishlistOnly={wishlistOnly}
+          onResetView={() => setWishlistOnly(false)}
+        />
       </main>
 
       <StorefrontFooter onNavigateCategory={(cat) => navigateStoreSection('catalog', cat)} />
 
+      <StorefrontBottomNav
+        activeTab={
+          profileModalOpen
+            ? 'profile'
+            : wishlistOnly
+            ? 'wishlist'
+            : storeSearchOpen
+            ? 'search'
+            : 'home'
+        }
+        onHome={() => {
+          setProfileModalOpen(false);
+          setStoreSearchOpen(false);
+          setSearchQuery('');
+          navigateStoreSection('top', 'Todos');
+        }}
+        onSearch={() => {
+          setProfileModalOpen(false);
+          setWishlistOnly(false);
+          setStoreSearchOpen((v) => !v);
+          requestAnimationFrame(() => {
+            const el = document.getElementById('catalog');
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          });
+        }}
+        onToggleWishlist={() => {
+          setProfileModalOpen(false);
+          setStoreSearchOpen(false);
+          setWishlistOnly((v) => !v);
+          requestAnimationFrame(() => {
+            const el = document.getElementById('catalog');
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          });
+        }}
+        onProfile={() => setProfileModalOpen(true)}
+      />
+
       <ProductDetailModal />
       <CartDrawer />
+      <ProfileNewsletterModal
+        isOpen={profileModalOpen}
+        onClose={() => setProfileModalOpen(false)}
+      />
     </div>
   );
 };

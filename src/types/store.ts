@@ -12,6 +12,11 @@ export type OrderStatus = 'Pendente' | 'Em Preparação' | 'Em Trânsito' | 'Ent
 
 export type PaymentMethod = 'Multicaixa Express' | 'Cartão' | 'Contra-Reembolso';
 
+export interface ProductColorVariant {
+  name: string;
+  image: string;
+}
+
 export interface Product {
   id: string;
   sku: string;
@@ -24,6 +29,7 @@ export interface Product {
   stock: number;
   sizes: string[];
   colors: string[];
+  colorVariants?: ProductColorVariant[];
   description: string;
   material: string;
   image: string;
@@ -166,6 +172,7 @@ export interface PromoBannerConfig {
 }
 
 export interface StorefrontConfig {
+  topNoticeText?: string;
   headerWordmark: string;
   navLabels: {
     collections: string;

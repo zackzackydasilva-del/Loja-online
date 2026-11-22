@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
   Check,
-  Image as ImageIcon,
   LayoutTemplate,
   Lock,
   Plus,
@@ -12,21 +11,10 @@ import {
 } from 'lucide-react';
 import { DEFAULT_STOREFRONT_CONFIG } from '../../data/seedData';
 import { useStore } from '../../context/StoreContext';
-import { ProductCategory, StorefrontConfig } from '../../types/store';
+import { StorefrontConfig } from '../../types/store';
 import { ImageField } from './ImageField';
 
-type SettingsSection = 'geral' | 'hero' | 'banners' | 'rodape';
-
-const PRODUCT_CATEGORIES: ProductCategory[] = [
-  'Mulher',
-  'Homem',
-  'Vestidos',
-  'Tops',
-  'Calçado',
-  'Malas',
-  'Acessórios',
-  'Saldos',
-];
+type SettingsSection = 'geral' | 'banner' | 'catalogo_rodape';
 
 function mergeStorefrontConfig(cfg?: Partial<StorefrontConfig>): StorefrontConfig {
   return {
@@ -190,10 +178,9 @@ export const AdminSettings: React.FC = () => {
     label: string;
     icon: React.ComponentType<{ className?: string }>;
   }[] = [
-    { id: 'geral', label: 'Geral & Moeda', icon: SlidersHorizontal },
-    { id: 'hero', label: 'Banner Principal & Lookbook', icon: Sparkles },
-    { id: 'banners', label: 'Banners & Categorias', icon: ImageIcon },
-    { id: 'rodape', label: 'Catálogo, Newsletter & Rodapé', icon: LayoutTemplate },
+    { id: 'geral', label: 'Geral, Marca & Menu', icon: SlidersHorizontal },
+    { id: 'banner', label: 'Banner Principal da Loja', icon: Sparkles },
+    { id: 'catalogo_rodape', label: 'Catálogo, Código Promo & Rodapé', icon: LayoutTemplate },
   ];
 
   return (
@@ -241,7 +228,7 @@ export const AdminSettings: React.FC = () => {
         </div>
       </div>
 
-      {/* SECTION 1: GERAL & MOEDA */}
+      {/* SECTION 1: GERAL, MARCA & MENU */}
       {section === 'geral' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
           <div className="lg:col-span-7 space-y-5">
@@ -250,7 +237,7 @@ export const AdminSettings: React.FC = () => {
               className="bg-white rounded-[24px] p-6 border border-black/5 space-y-4"
             >
               <h3 className="text-base font-semibold text-[#1C1C1E]">
-                Identidade, Moeda & Navegação da Loja
+                Identidade, Moeda & Menu da Loja
               </h3>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -268,7 +255,7 @@ export const AdminSettings: React.FC = () => {
 
                 <div>
                   <label className="block text-xs font-medium text-[#555552] mb-1">
-                    Marca no Cabeçalho / Rodapé
+                    Logótipo Escrito no Topo & Rodapé
                   </label>
                   <input
                     type="text"
@@ -329,11 +316,24 @@ export const AdminSettings: React.FC = () => {
                 </div>
               </div>
 
+              <div>
+                <label className="block text-xs font-medium text-[#555552] mb-1">
+                  Aviso no Topo da Loja (Pagamento na Entrega)
+                </label>
+                <input
+                  type="text"
+                  value={sf.topNoticeText || ''}
+                  onChange={(e) => setSf({ ...sf, topNoticeText: e.target.value })}
+                  placeholder="Pagamento feito apenas na entrega · Pague apenas quando receber a sua encomenda"
+                  className="w-full border border-black/15 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-[#1C1C1E]"
+                />
+              </div>
+
               <div className="pt-2 border-t border-black/6 space-y-3">
                 <p className="text-xs font-semibold text-[#1C1C1E]">
-                  Etiquetas do Menu Principal da Loja
+                  Links do Menu Superior da Loja
                 </p>
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                   <div>
                     <label className="block text-[11px] text-[#72726E] mb-1">Coleções</label>
                     <input
@@ -385,20 +385,6 @@ export const AdminSettings: React.FC = () => {
                         setSf({
                           ...sf,
                           navLabels: { ...sf.navLabels, sale: e.target.value },
-                        })
-                      }
-                      className="w-full border border-black/15 rounded-xl px-2.5 py-1.5 text-xs focus:outline-none focus:border-[#1C1C1E]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] text-[#72726E] mb-1">Botão Gestão</label>
-                    <input
-                      type="text"
-                      value={sf.navLabels.admin}
-                      onChange={(e) =>
-                        setSf({
-                          ...sf,
-                          navLabels: { ...sf.navLabels, admin: e.target.value },
                         })
                       }
                       className="w-full border border-black/15 rounded-xl px-2.5 py-1.5 text-xs focus:outline-none focus:border-[#1C1C1E]"
@@ -567,8 +553,8 @@ export const AdminSettings: React.FC = () => {
             <div className="bg-[#1C1C1E] text-white rounded-[24px] p-6 space-y-3">
               <h3 className="text-sm font-semibold">Limpar Registos & Atividades</h3>
               <p className="text-xs text-white/65 leading-relaxed">
-                Remove todos os produtos, encomendas, clientes, tarefas, objetivos e movimentos de
-                inventário, mantendo as personalizações visuais da loja.
+                Remove todos os produtos, encomendas, clientes, custos, tarefas, objetivos e
+                movimentos de inventário, mantendo as personalizações visuais da loja.
               </p>
 
               {confirmClear ? (
@@ -604,38 +590,36 @@ export const AdminSettings: React.FC = () => {
         </div>
       )}
 
-      {/* SECTION 2: BANNER PRINCIPAL & LOOKBOOK */}
-      {section === 'hero' && (
+      {/* SECTION 2: BANNER PRINCIPAL DA LOJA (Textos, Botão & Slides/Miniaturas) */}
+      {section === 'banner' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-          <div className="lg:col-span-6 bg-white rounded-[24px] p-6 border border-black/5 space-y-4">
-            <h3 className="text-base font-semibold text-[#1C1C1E]">Textos do Banner Principal</h3>
-
+          <div className="lg:col-span-5 bg-white rounded-[24px] p-6 border border-black/5 space-y-4">
             <div>
-              <label className="block text-xs font-medium text-[#555552] mb-1">
-                Etiqueta Superior (Eyebrow)
-              </label>
-              <input
-                type="text"
-                value={sf.heroEyebrow}
-                onChange={(e) => setSf({ ...sf, heroEyebrow: e.target.value })}
-                className="w-full border border-black/15 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:border-[#1C1C1E]"
-              />
+              <h3 className="text-base font-semibold text-[#1C1C1E]">
+                Textos & Botão do Banner Escuro
+              </h3>
+              <p className="text-[11px] text-[#72726E] mt-0.5">
+                Estes detalhes aparecem diretamente no cartão escuro principal no topo da loja.
+              </p>
             </div>
 
             <div>
               <label className="block text-xs font-medium text-[#555552] mb-1">
-                Título Principal
+                Título em Destaque (exibido em maiúsculas)
               </label>
               <input
                 type="text"
                 value={sf.heroTitle}
                 onChange={(e) => setSf({ ...sf, heroTitle: e.target.value })}
+                placeholder="Ex: Essenciais da Estação"
                 className="w-full border border-black/15 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:border-[#1C1C1E]"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-[#555552] mb-1">Subtítulo</label>
+              <label className="block text-xs font-medium text-[#555552] mb-1">
+                Subtítulo Curto (até 2 linhas no banner)
+              </label>
               <textarea
                 rows={3}
                 value={sf.heroSubtitle}
@@ -644,72 +628,30 @@ export const AdminSettings: React.FC = () => {
               />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-[#555552] mb-1">
-                  Botão Primário
-                </label>
-                <input
-                  type="text"
-                  value={sf.heroPrimaryCta}
-                  onChange={(e) => setSf({ ...sf, heroPrimaryCta: e.target.value })}
-                  className="w-full border border-black/15 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:border-[#1C1C1E]"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-[#555552] mb-1">
-                  Botão Secundário (Lookbook)
-                </label>
-                <input
-                  type="text"
-                  value={sf.heroSecondaryCta}
-                  onChange={(e) => setSf({ ...sf, heroSecondaryCta: e.target.value })}
-                  className="w-full border border-black/15 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:border-[#1C1C1E]"
-                />
-              </div>
-            </div>
-
-            <div className="pt-3 border-t border-black/6 space-y-3">
-              <p className="text-xs font-semibold text-[#1C1C1E]">
-                3 Destaques de Confiança abaixo do Banner
-              </p>
-              {sf.heroTrustBadges.map((badge, idx) => (
-                <div key={idx} className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 bg-[#F6F6F4] p-3 rounded-xl">
-                  <input
-                    type="text"
-                    value={badge.title}
-                    onChange={(e) => {
-                      const next = [...sf.heroTrustBadges];
-                      next[idx] = { ...next[idx], title: e.target.value };
-                      setSf({ ...sf, heroTrustBadges: next });
-                    }}
-                    placeholder="Título"
-                    className="bg-white border border-black/12 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none"
-                  />
-                  <input
-                    type="text"
-                    value={badge.subtitle}
-                    onChange={(e) => {
-                      const next = [...sf.heroTrustBadges];
-                      next[idx] = { ...next[idx], subtitle: e.target.value };
-                      setSf({ ...sf, heroTrustBadges: next });
-                    }}
-                    placeholder="Subtítulo"
-                    className="bg-white border border-black/12 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none"
-                  />
-                </div>
-              ))}
+            <div>
+              <label className="block text-xs font-medium text-[#555552] mb-1">
+                Texto do Botão Branco (CTA)
+              </label>
+              <input
+                type="text"
+                value={sf.heroPrimaryCta}
+                onChange={(e) => setSf({ ...sf, heroPrimaryCta: e.target.value })}
+                placeholder="Ex: Explorar Coleção"
+                className="w-full border border-black/15 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:border-[#1C1C1E]"
+              />
             </div>
           </div>
 
-          <div className="lg:col-span-6 bg-white rounded-[24px] p-6 border border-black/5 space-y-4">
+          <div className="lg:col-span-7 bg-white rounded-[24px] p-6 border border-black/5 space-y-4">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h3 className="text-base font-semibold text-[#1C1C1E]">
-                  Imagens do Banner Principal / Lookbook ({sf.heroSlides.length})
+                  Slides & Miniaturas do Banner ({sf.heroSlides.length})
                 </h3>
                 <p className="text-[11px] text-[#72726E] mt-0.5">
-                  Tamanho ideal: <span className="font-mono font-semibold text-[#1C1C1E]">1200 × 1400 px</span> (vertical 4:5 · mínimo 900 × 1050 px)
+                  As primeiras 3 imagens aparecem como miniaturas clicáveis no banner e nos pontos de navegação por baixo. Tamanho ideal:{' '}
+                  <span className="font-mono font-semibold text-[#1C1C1E]">900 × 1050 px</span>{' '}
+                  (vertical 4:5 · mín. 700 × 820 px).
                 </p>
               </div>
               <button
@@ -723,12 +665,12 @@ export const AdminSettings: React.FC = () => {
                       {
                         index: nextNum,
                         image: sf.heroSlides[0]?.image || DEFAULT_STOREFRONT_CONFIG.heroSlides[0].image,
-                        caption: `Editorial Boutique · Look ${nextNum}`,
+                        caption: `Look ${nextNum}`,
                       },
                     ],
                   });
                 }}
-                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-[#1C1C1E] text-white text-xs font-medium cursor-pointer"
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-[#1C1C1E] text-white text-xs font-medium cursor-pointer shrink-0"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Adicionar Slide</span>
@@ -763,7 +705,9 @@ export const AdminSettings: React.FC = () => {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-medium text-[#555552] mb-1">Legenda</label>
+                    <label className="block text-xs font-medium text-[#555552] mb-1">
+                      Descrição / Alt da Imagem
+                    </label>
                     <input
                       type="text"
                       value={slide.caption}
@@ -778,7 +722,7 @@ export const AdminSettings: React.FC = () => {
 
                   <ImageField
                     label="Fotografia do Banner"
-                    recommendedSize="1200 × 1400 px (vertical 4:5 · mín. 900 × 1050 px)"
+                    recommendedSize="900 × 1050 px (vertical 4:5 · mín. 700 × 820 px)"
                     value={slide.image}
                     onChange={(url) => {
                       const next = [...sf.heroSlides];
@@ -793,508 +737,62 @@ export const AdminSettings: React.FC = () => {
         </div>
       )}
 
-      {/* SECTION 3: BANNERS & CATEGORIAS */}
-      {section === 'banners' && (
-        <div className="space-y-5">
-          {/* Promo Banners */}
-          <section className="bg-white rounded-[24px] p-6 border border-black/5 space-y-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-base font-semibold text-[#1C1C1E]">
-                  Banners Promocionais ({sf.promoBanners.length})
-                </h3>
-                <p className="text-[11px] text-[#72726E] mt-0.5">
-                  Tamanho ideal da foto lateral: <span className="font-mono font-semibold text-[#1C1C1E]">900 × 960 px</span> (retrato/quadrado ~1:1 · mínimo 600 × 640 px)
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() =>
-                  setSf({
-                    ...sf,
-                    promoBanners: [
-                      ...sf.promoBanners,
-                      {
-                        eyebrow: 'Campanha Especial',
-                        title: 'Nova Seleção\nEm Destaque',
-                        ctaText: 'Explorar',
-                        targetCategory: 'Todos',
-                        image: DEFAULT_STOREFRONT_CONFIG.promoBanners[0].image,
-                      },
-                    ],
-                  })
-                }
-                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-[#1C1C1E] text-white text-xs font-medium cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Adicionar Banner</span>
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {sf.promoBanners.map((banner, idx) => (
-                <div key={idx} className="p-4 rounded-2xl bg-[#F6F6F4] space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-[#1C1C1E]">
-                      Banner #{idx + 1}
-                    </span>
-                    {sf.promoBanners.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setSf({
-                            ...sf,
-                            promoBanners: sf.promoBanners.filter((_, i) => i !== idx),
-                          })
-                        }
-                        className="inline-flex items-center gap-1 text-[11px] text-red-700 hover:underline cursor-pointer"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>Remover</span>
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                    <div>
-                      <label className="block text-[11px] text-[#555552] mb-1">Etiqueta</label>
-                      <input
-                        type="text"
-                        value={banner.eyebrow}
-                        onChange={(e) => {
-                          const next = [...sf.promoBanners];
-                          next[idx] = { ...next[idx], eyebrow: e.target.value };
-                          setSf({ ...sf, promoBanners: next });
-                        }}
-                        className="w-full bg-white border border-black/15 rounded-xl px-3 py-1.5 text-xs"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] text-[#555552] mb-1">
-                        Categoria Destino
-                      </label>
-                      <select
-                        value={banner.targetCategory}
-                        onChange={(e) => {
-                          const next = [...sf.promoBanners];
-                          next[idx] = {
-                            ...next[idx],
-                            targetCategory: e.target.value as ProductCategory | 'Todos',
-                          };
-                          setSf({ ...sf, promoBanners: next });
-                        }}
-                        className="w-full bg-white border border-black/15 rounded-xl px-3 py-1.5 text-xs"
-                      >
-                        <option value="Todos">Todos</option>
-                        {PRODUCT_CATEGORIES.map((c) => (
-                          <option key={c} value={c}>
-                            {c}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] text-[#555552] mb-1">
-                      Título (use Enter para quebra de linha)
-                    </label>
-                    <textarea
-                      rows={2}
-                      value={banner.title}
-                      onChange={(e) => {
-                        const next = [...sf.promoBanners];
-                        next[idx] = { ...next[idx], title: e.target.value };
-                        setSf({ ...sf, promoBanners: next });
-                      }}
-                      className="w-full bg-white border border-black/15 rounded-xl px-3 py-1.5 text-xs"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] text-[#555552] mb-1">Texto do Botão</label>
-                    <input
-                      type="text"
-                      value={banner.ctaText}
-                      onChange={(e) => {
-                        const next = [...sf.promoBanners];
-                        next[idx] = { ...next[idx], ctaText: e.target.value };
-                        setSf({ ...sf, promoBanners: next });
-                      }}
-                      className="w-full bg-white border border-black/15 rounded-xl px-3 py-1.5 text-xs"
-                    />
-                  </div>
-
-                  <ImageField
-                    label="Imagem do Banner"
-                    recommendedSize="900 × 960 px (retrato/quadrado · mín. 600 × 640 px)"
-                    compact
-                    value={banner.image}
-                    onChange={(url) => {
-                      const next = [...sf.promoBanners];
-                      next[idx] = { ...next[idx], image: url };
-                      setSf({ ...sf, promoBanners: next });
-                    }}
-                  />
-                </div>
-              ))}
-            </div>
-          </section>
-
-          {/* Editorial Collection Cards */}
-          <section className="bg-white rounded-[24px] p-6 border border-black/5 space-y-4">
-            <div>
-              <h3 className="text-base font-semibold text-[#1C1C1E]">
-                Secção de Coleções & Cartões Editoriais
-              </h3>
-              <p className="text-[11px] text-[#72726E] mt-0.5">
-                Tamanho ideal dos 4 cartões: <span className="font-mono font-semibold text-[#1C1C1E]">800 × 1000 px</span> (vertical 4:5 · mínimo 600 × 750 px)
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-[#555552] mb-1">Etiqueta</label>
-                <input
-                  type="text"
-                  value={sf.collectionsEyebrow}
-                  onChange={(e) => setSf({ ...sf, collectionsEyebrow: e.target.value })}
-                  className="w-full border border-black/15 rounded-xl px-3 py-2 text-xs"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-[#555552] mb-1">
-                  Título da Secção
-                </label>
-                <input
-                  type="text"
-                  value={sf.collectionsTitle}
-                  onChange={(e) => setSf({ ...sf, collectionsTitle: e.target.value })}
-                  className="w-full border border-black/15 rounded-xl px-3 py-2 text-xs"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-[#555552] mb-1">
-                  Link de Ação
-                </label>
-                <input
-                  type="text"
-                  value={sf.collectionsActionText}
-                  onChange={(e) => setSf({ ...sf, collectionsActionText: e.target.value })}
-                  className="w-full border border-black/15 rounded-xl px-3 py-2 text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 pt-2">
-              {sf.editorialCards.map((card, idx) => (
-                <div key={idx} className="p-4 rounded-2xl bg-[#F6F6F4] space-y-3">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                    <div>
-                      <label className="block text-[11px] text-[#555552] mb-1">Título do Cartão</label>
-                      <input
-                        type="text"
-                        value={card.title}
-                        onChange={(e) => {
-                          const next = [...sf.editorialCards];
-                          next[idx] = { ...next[idx], title: e.target.value };
-                          setSf({ ...sf, editorialCards: next });
-                        }}
-                        className="w-full bg-white border border-black/15 rounded-xl px-3 py-1.5 text-xs"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] text-[#555552] mb-1">Categoria</label>
-                      <select
-                        value={card.category}
-                        onChange={(e) => {
-                          const next = [...sf.editorialCards];
-                          next[idx] = {
-                            ...next[idx],
-                            category: e.target.value as ProductCategory,
-                          };
-                          setSf({ ...sf, editorialCards: next });
-                        }}
-                        className="w-full bg-white border border-black/15 rounded-xl px-3 py-1.5 text-xs"
-                      >
-                        {PRODUCT_CATEGORIES.map((c) => (
-                          <option key={c} value={c}>
-                            {c}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                  <ImageField
-                    label="Imagem Editorial"
-                    recommendedSize="800 × 1000 px (vertical 4:5 · mín. 600 × 750 px)"
-                    compact
-                    value={card.image}
-                    onChange={(url) => {
-                      const next = [...sf.editorialCards];
-                      next[idx] = { ...next[idx], image: url };
-                      setSf({ ...sf, editorialCards: next });
-                    }}
-                  />
-                </div>
-              ))}
-            </div>
-          </section>
-
-          {/* Category Strip Items */}
-          <section className="bg-white rounded-[24px] p-6 border border-black/5 space-y-4">
-            <div>
-              <h3 className="text-base font-semibold text-[#1C1C1E]">
-                Barra de Categorias Circulares ({sf.categoryStripItems.length})
-              </h3>
-              <p className="text-[11px] text-[#72726E] mt-0.5">
-                Tamanho ideal das miniaturas: <span className="font-mono font-semibold text-[#1C1C1E]">400 × 400 px</span> (quadrado 1:1 · recorte circular automático)
-              </p>
-            </div>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {sf.categoryStripItems.map((item, idx) => (
-                <div key={idx} className="p-4 rounded-2xl bg-[#F6F6F4] space-y-3">
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 items-end">
-                    <div>
-                      <label className="block text-[11px] text-[#555552] mb-1">Etiqueta</label>
-                      <input
-                        type="text"
-                        value={item.label}
-                        onChange={(e) => {
-                          const next = [...sf.categoryStripItems];
-                          next[idx] = { ...next[idx], label: e.target.value };
-                          setSf({ ...sf, categoryStripItems: next });
-                        }}
-                        className="w-full bg-white border border-black/15 rounded-xl px-3 py-1.5 text-xs"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] text-[#555552] mb-1">Categoria</label>
-                      <select
-                        value={item.category}
-                        onChange={(e) => {
-                          const next = [...sf.categoryStripItems];
-                          next[idx] = {
-                            ...next[idx],
-                            category: e.target.value as ProductCategory,
-                          };
-                          setSf({ ...sf, categoryStripItems: next });
-                        }}
-                        className="w-full bg-white border border-black/15 rounded-xl px-3 py-1.5 text-xs"
-                      >
-                        {PRODUCT_CATEGORIES.map((c) => (
-                          <option key={c} value={c}>
-                            {c}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <label className="inline-flex items-center gap-2 text-xs text-[#1C1C1E] py-1.5 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={Boolean(item.isSale)}
-                        onChange={(e) => {
-                          const next = [...sf.categoryStripItems];
-                          next[idx] = { ...next[idx], isSale: e.target.checked };
-                          setSf({ ...sf, categoryStripItems: next });
-                        }}
-                      />
-                      <span>Estilo Badge Saldos</span>
-                    </label>
-                  </div>
-
-                  {!item.isSale && (
-                    <ImageField
-                      label="Miniatura"
-                      recommendedSize="400 × 400 px (quadrado 1:1 · recorte circular)"
-                      compact
-                      allowEmpty
-                      value={item.image}
-                      onChange={(url) => {
-                        const next = [...sf.categoryStripItems];
-                        next[idx] = { ...next[idx], image: url };
-                        setSf({ ...sf, categoryStripItems: next });
-                      }}
-                    />
-                  )}
-                </div>
-              ))}
-            </div>
-          </section>
-        </div>
-      )}
-
-      {/* SECTION 4: CATÁLOGO, NEWSLETTER & RODAPÉ */}
-      {section === 'rodape' && (
+      {/* SECTION 3: CATÁLOGO, CÓDIGO PROMO & RODAPÉ */}
+      {section === 'catalogo_rodape' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
           <div className="lg:col-span-6 space-y-5">
             <section className="bg-white rounded-[24px] p-6 border border-black/5 space-y-4">
-              <h3 className="text-base font-semibold text-[#1C1C1E]">
-                Cabeçalho do Catálogo & Garantias
-              </h3>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-[#555552] mb-1">
-                    Etiqueta do Catálogo
-                  </label>
-                  <input
-                    type="text"
-                    value={sf.catalogEyebrow}
-                    onChange={(e) => setSf({ ...sf, catalogEyebrow: e.target.value })}
-                    className="w-full border border-black/15 rounded-xl px-3 py-2 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-[#555552] mb-1">
-                    Título do Catálogo
-                  </label>
-                  <input
-                    type="text"
-                    value={sf.catalogTitle}
-                    onChange={(e) => setSf({ ...sf, catalogTitle: e.target.value })}
-                    className="w-full border border-black/15 rounded-xl px-3 py-2 text-sm"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2.5 pt-2 border-t border-black/6">
-                <p className="text-xs font-semibold text-[#1C1C1E]">4 Cartões de Garantia</p>
-                {sf.guarantees.map((g, idx) => (
-                  <div
-                    key={idx}
-                    className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 bg-[#F6F6F4] p-3 rounded-xl"
-                  >
-                    <input
-                      type="text"
-                      value={g.title}
-                      onChange={(e) => {
-                        const next = [...sf.guarantees];
-                        next[idx] = { ...next[idx], title: e.target.value };
-                        setSf({ ...sf, guarantees: next });
-                      }}
-                      placeholder="Título"
-                      className="bg-white border border-black/12 rounded-lg px-2.5 py-1.5 text-xs"
-                    />
-                    <input
-                      type="text"
-                      value={g.subtitle}
-                      onChange={(e) => {
-                        const next = [...sf.guarantees];
-                        next[idx] = { ...next[idx], subtitle: e.target.value };
-                        setSf({ ...sf, guarantees: next });
-                      }}
-                      placeholder="Descrição curta"
-                      className="bg-white border border-black/12 rounded-lg px-2.5 py-1.5 text-xs"
-                    />
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            <section className="bg-white rounded-[24px] p-6 border border-black/5 space-y-4">
               <div>
-                <h3 className="text-base font-semibold text-[#1C1C1E]">Banner de Newsletter</h3>
+                <h3 className="text-base font-semibold text-[#1C1C1E]">
+                  Secção de Produtos & Cupão do Saco
+                </h3>
                 <p className="text-[11px] text-[#72726E] mt-0.5">
-                  Tamanho ideal da fotografia lateral: <span className="font-mono font-semibold text-[#1C1C1E]">1000 × 600 px</span> (horizontal 5:3 · mínimo 800 × 480 px)
+                  Personaliza o título principal acima dos cartões de produtos e o código promocional de 10% no carrinho.
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-[#555552] mb-1">Etiqueta</label>
-                  <input
-                    type="text"
-                    value={sf.newsletter.eyebrow}
-                    onChange={(e) =>
-                      setSf({
-                        ...sf,
-                        newsletter: { ...sf.newsletter, eyebrow: e.target.value },
-                      })
-                    }
-                    className="w-full border border-black/15 rounded-xl px-3 py-2 text-xs"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-[#555552] mb-1">
-                    Código Promocional
-                  </label>
-                  <input
-                    type="text"
-                    value={sf.newsletter.promoCode}
-                    onChange={(e) =>
-                      setSf({
-                        ...sf,
-                        newsletter: { ...sf.newsletter, promoCode: e.target.value },
-                      })
-                    }
-                    className="w-full font-mono border border-black/15 rounded-xl px-3 py-2 text-xs"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-[#555552] mb-1">Título</label>
-                  <input
-                    type="text"
-                    value={sf.newsletter.title}
-                    onChange={(e) =>
-                      setSf({
-                        ...sf,
-                        newsletter: { ...sf.newsletter, title: e.target.value },
-                      })
-                    }
-                    className="w-full border border-black/15 rounded-xl px-3 py-2 text-xs"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-[#555552] mb-1">
-                    Texto do Botão
-                  </label>
-                  <input
-                    type="text"
-                    value={sf.newsletter.buttonText}
-                    onChange={(e) =>
-                      setSf({
-                        ...sf,
-                        newsletter: { ...sf.newsletter, buttonText: e.target.value },
-                      })
-                    }
-                    className="w-full border border-black/15 rounded-xl px-3 py-2 text-xs"
-                  />
-                </div>
-              </div>
-
               <div>
-                <label className="block text-xs font-medium text-[#555552] mb-1">Descrição</label>
-                <textarea
-                  rows={2}
-                  value={sf.newsletter.description}
-                  onChange={(e) =>
-                    setSf({
-                      ...sf,
-                      newsletter: { ...sf.newsletter, description: e.target.value },
-                    })
-                  }
-                  className="w-full border border-black/15 rounded-xl px-3 py-2 text-xs"
+                <label className="block text-xs font-medium text-[#555552] mb-1">
+                  Título da Secção de Artigos
+                </label>
+                <input
+                  type="text"
+                  value={sf.catalogTitle}
+                  onChange={(e) => setSf({ ...sf, catalogTitle: e.target.value })}
+                  placeholder="Ex: Novos Artigos Populares"
+                  className="w-full border border-black/15 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-[#1C1C1E]"
                 />
               </div>
 
-              <ImageField
-                label="Imagem Lateral da Newsletter"
-                recommendedSize="1000 × 600 px (horizontal 5:3 · mín. 800 × 480 px)"
-                compact
-                value={sf.newsletter.image}
-                onChange={(url) =>
-                  setSf({ ...sf, newsletter: { ...sf.newsletter, image: url } })
-                }
-              />
+              <div>
+                <label className="block text-xs font-medium text-[#555552] mb-1">
+                  Código Promocional Ativo no Saco (10% desconto)
+                </label>
+                <input
+                  type="text"
+                  value={sf.newsletter.promoCode}
+                  onChange={(e) =>
+                    setSf({
+                      ...sf,
+                      newsletter: { ...sf.newsletter, promoCode: e.target.value.toUpperCase() },
+                    })
+                  }
+                  placeholder="Ex: LUNORA10"
+                  className="w-full font-mono border border-black/15 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-[#1C1C1E]"
+                />
+              </div>
             </section>
           </div>
 
           <div className="lg:col-span-6 bg-white rounded-[24px] p-6 border border-black/5 space-y-4">
-            <h3 className="text-base font-semibold text-[#1C1C1E]">Informações do Rodapé</h3>
+            <div>
+              <h3 className="text-base font-semibold text-[#1C1C1E]">
+                Textos Visíveis no Rodapé da Loja
+              </h3>
+              <p className="text-[11px] text-[#72726E] mt-0.5">
+                Atualiza apenas os blocos escritos que aparecem no rodapé branco atual.
+              </p>
+            </div>
 
             <div>
               <label className="block text-xs font-medium text-[#555552] mb-1">
@@ -1306,107 +804,14 @@ export const AdminSettings: React.FC = () => {
                 onChange={(e) =>
                   setSf({ ...sf, footer: { ...sf.footer, tagline: e.target.value } })
                 }
-                className="w-full border border-black/15 rounded-xl px-3 py-2 text-xs"
+                className="w-full border border-black/15 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#1C1C1E]"
               />
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-medium text-[#555552] mb-1">
-                  Localização / Prazo de Entrega
-                </label>
-                <input
-                  type="text"
-                  value={sf.footer.locationText}
-                  onChange={(e) =>
-                    setSf({ ...sf, footer: { ...sf.footer, locationText: e.target.value } })
-                  }
-                  className="w-full border border-black/15 rounded-xl px-3 py-2 text-xs"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-[#555552] mb-1">
-                  Texto de Direitos de Autor
-                </label>
-                <input
-                  type="text"
-                  value={sf.footer.copyrightText}
-                  onChange={(e) =>
-                    setSf({ ...sf, footer: { ...sf.footer, copyrightText: e.target.value } })
-                  }
-                  className="w-full border border-black/15 rounded-xl px-3 py-2 text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-black/6">
-              <div className="space-y-2">
-                <label className="block text-xs font-medium text-[#555552]">
-                  Título Coluna Apoio
-                </label>
-                <input
-                  type="text"
-                  value={sf.footer.supportTitle}
-                  onChange={(e) =>
-                    setSf({ ...sf, footer: { ...sf.footer, supportTitle: e.target.value } })
-                  }
-                  className="w-full border border-black/15 rounded-xl px-3 py-1.5 text-xs"
-                />
-                <label className="block text-[11px] text-[#72726E]">
-                  Links (um por linha)
-                </label>
-                <textarea
-                  rows={5}
-                  value={sf.footer.supportLinks.join('\n')}
-                  onChange={(e) =>
-                    setSf({
-                      ...sf,
-                      footer: {
-                        ...sf.footer,
-                        supportLinks: e.target.value.split('\n').filter((l) => l.trim().length > 0),
-                      },
-                    })
-                  }
-                  className="w-full border border-black/15 rounded-xl px-3 py-2 text-xs"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="block text-xs font-medium text-[#555552]">
-                  Título Coluna Atelier
-                </label>
-                <input
-                  type="text"
-                  value={sf.footer.atelierTitle}
-                  onChange={(e) =>
-                    setSf({ ...sf, footer: { ...sf.footer, atelierTitle: e.target.value } })
-                  }
-                  className="w-full border border-black/15 rounded-xl px-3 py-1.5 text-xs"
-                />
-                <label className="block text-[11px] text-[#72726E]">
-                  Links (um por linha)
-                </label>
-                <textarea
-                  rows={5}
-                  value={sf.footer.atelierLinks.join('\n')}
-                  onChange={(e) =>
-                    setSf({
-                      ...sf,
-                      footer: {
-                        ...sf.footer,
-                        atelierLinks: e.target.value.split('\n').filter((l) => l.trim().length > 0),
-                      },
-                    })
-                  }
-                  className="w-full border border-black/15 rounded-xl px-3 py-2 text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-black/6">
-              <div>
-                <label className="block text-xs font-medium text-[#555552] mb-1">
-                  Título Bloco Newsletter Rodapé
+                  Título da Subscrição (Rodapé)
                 </label>
                 <input
                   type="text"
@@ -1414,12 +819,12 @@ export const AdminSettings: React.FC = () => {
                   onChange={(e) =>
                     setSf({ ...sf, footer: { ...sf.footer, newsletterTitle: e.target.value } })
                   }
-                  className="w-full border border-black/15 rounded-xl px-3 py-2 text-xs"
+                  className="w-full border border-black/15 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#1C1C1E]"
                 />
               </div>
               <div>
                 <label className="block text-xs font-medium text-[#555552] mb-1">
-                  Descrição Newsletter Rodapé
+                  Texto da Subscrição (Rodapé)
                 </label>
                 <input
                   type="text"
@@ -1430,7 +835,36 @@ export const AdminSettings: React.FC = () => {
                       footer: { ...sf.footer, newsletterDescription: e.target.value },
                     })
                   }
-                  className="w-full border border-black/15 rounded-xl px-3 py-2 text-xs"
+                  className="w-full border border-black/15 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#1C1C1E]"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-black/6">
+              <div>
+                <label className="block text-xs font-medium text-[#555552] mb-1">
+                  Localização / Prazo de Entrega
+                </label>
+                <input
+                  type="text"
+                  value={sf.footer.locationText}
+                  onChange={(e) =>
+                    setSf({ ...sf, footer: { ...sf.footer, locationText: e.target.value } })
+                  }
+                  className="w-full border border-black/15 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#1C1C1E]"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[#555552] mb-1">
+                  Direitos de Autor
+                </label>
+                <input
+                  type="text"
+                  value={sf.footer.copyrightText}
+                  onChange={(e) =>
+                    setSf({ ...sf, footer: { ...sf.footer, copyrightText: e.target.value } })
+                  }
+                  className="w-full border border-black/15 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#1C1C1E]"
                 />
               </div>
             </div>

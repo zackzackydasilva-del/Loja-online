@@ -11,6 +11,7 @@ import type {
   PaymentMethod,
   Product,
   ProductCategory,
+  ProductColorVariant,
   StockMovement,
   StoreCampaign,
   StoreCost,
@@ -259,7 +260,36 @@ export async function checkSupabaseTablesStatus(): Promise<{
   };
 }
 
+function parseProductColors(raw: unknown): {
+  colors: string[];
+  colorVariants: ProductColorVariant[];
+} {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return { colors: ['Neutro'], colorVariants: [] };
+  }
+  const variants: ProductColorVariant[] = [];
+  const names: string[] = [];
+  for (const item of raw) {
+    if (item && typeof item === 'object' && 'image' in item && 'name' in item) {
+      const obj = item as { name?: unknown; image?: unknown };
+      const name = String(obj.name ?? '').trim();
+      const image = String(obj.image ?? '').trim();
+      if (name && image) {
+        variants.push({ name, image });
+        names.push(name);
+      }
+    } else if (typeof item === 'string' && item.trim()) {
+      names.push(item.trim());
+    }
+  }
+  return {
+    colors: names.length > 0 ? names : ['Neutro'],
+    colorVariants: variants,
+  };
+}
+
 function mapProductFromRow(row: Record<string, unknown>): Product {
+  const { colors, colorVariants } = parseProductColors(row.colors);
   return {
     id: String(row.id),
     sku: String(row.sku),
@@ -271,7 +301,8 @@ function mapProductFromRow(row: Record<string, unknown>): Product {
     reviewCount: Number(row.review_count ?? 1),
     stock: Number(row.stock ?? 0),
     sizes: Array.isArray(row.sizes) ? (row.sizes as string[]) : ['Único'],
-    colors: Array.isArray(row.colors) ? (row.colors as string[]) : ['Neutro'],
+    colors,
+    colorVariants,
     description: String(row.description ?? ''),
     material: String(row.material ?? ''),
     image: String(row.image),
@@ -282,6 +313,8 @@ function mapProductFromRow(row: Record<string, unknown>): Product {
 }
 
 function mapProductToRow(p: Product) {
+  const serializedColors =
+    p.colorVariants && p.colorVariants.length > 0 ? p.colorVariants : p.colors;
   return {
     id: p.id,
     sku: p.sku,
@@ -293,7 +326,7 @@ function mapProductToRow(p: Product) {
     review_count: p.reviewCount,
     stock: p.stock,
     sizes: p.sizes,
-    colors: p.colors,
+    colors: serializedColors,
     description: p.description,
     material: p.material,
     image: p.image,
@@ -1361,7 +1394,16 @@ export async function updateProductInStore(id: string, updates: Partial<Product>
     if (updates.originalPrice !== undefined) rowUpdates.original_price = updates.originalPrice;
     if (updates.stock !== undefined) rowUpdates.stock = updates.stock;
     if (updates.sizes !== undefined) rowUpdates.sizes = updates.sizes;
-    if (updates.colors !== undefined) rowUpdates.colors = updates.colors;
+    if (updates.colorVariants !== undefined) {
+      rowUpdates.colors =
+        updates.colorVariants.length > 0
+          ? updates.colorVariants
+          : updates.colors && updates.colors.length > 0
+          ? updates.colors
+          : ['Neutro'];
+    } else if (updates.colors !== undefined) {
+      rowUpdates.colors = updates.colors;
+    }
     if (updates.description !== undefined) rowUpdates.description = updates.description;
     if (updates.material !== undefined) rowUpdates.material = updates.material;
     if (updates.image !== undefined) rowUpdates.image = updates.image;

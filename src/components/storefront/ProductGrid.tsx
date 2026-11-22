@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { ArrowRight, Heart, Plus, Star } from 'lucide-react';
+import React, { useMemo, useRef, useState } from 'react';
+import { ChevronLeft, ChevronRight, Heart, Plus } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import { Product, ProductCategory } from '../../types/store';
 import { formatMoney } from '../../utils/currency';
@@ -17,7 +17,15 @@ const FILTER_TABS: (ProductCategory | 'Todos')[] = [
   'Saldos',
 ];
 
-export const ProductGrid: React.FC = () => {
+interface ProductGridProps {
+  wishlistOnly: boolean;
+  onResetView: () => void;
+}
+
+export const ProductGrid: React.FC<ProductGridProps> = ({
+  wishlistOnly,
+  onResetView,
+}) => {
   const {
     products,
     selectedCategory,
@@ -26,18 +34,28 @@ export const ProductGrid: React.FC = () => {
     setSearchQuery,
     wishlist,
     toggleWishlist,
-    addToCart,
     setQuickViewProduct,
-    setActiveAppView,
     settings,
   } = useStore();
 
-  const [sortBy, setSortBy] = useState<'featured' | 'price-asc' | 'price-desc' | 'rating'>('featured');
+  const [sortBy, setSortBy] = useState<'featured' | 'price-asc' | 'price-desc'>('featured');
+  const carouselRef = useRef<HTMLDivElement | null>(null);
   const cfg = settings.storefrontConfig;
+
+  const favoriteCarouselProducts = useMemo(() => {
+    const featured = products.filter((p) => p.featured || wishlist.includes(p.id));
+    if (featured.length >= 4) return featured;
+    const seen = new Set(featured.map((p) => p.id));
+    return [...featured, ...products.filter((p) => !seen.has(p.id))];
+  }, [products, wishlist]);
 
   const filteredProducts = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     const list = products.filter((p) => {
+      if (wishlistOnly && !wishlist.includes(p.id)) {
+        return false;
+      }
+
       const matchesCat =
         selectedCategory === 'Todos'
           ? true
@@ -56,201 +74,257 @@ export const ProductGrid: React.FC = () => {
 
     if (sortBy === 'price-asc') return [...list].sort((a, b) => a.price - b.price);
     if (sortBy === 'price-desc') return [...list].sort((a, b) => b.price - a.price);
-    if (sortBy === 'rating') return [...list].sort((a, b) => b.rating - a.rating);
     return list;
-  }, [products, selectedCategory, searchQuery, sortBy]);
+  }, [products, selectedCategory, searchQuery, sortBy, wishlistOnly, wishlist]);
 
   const handleQuickAdd = (e: React.MouseEvent, product: Product) => {
     e.stopPropagation();
-    if (product.stock <= 0) return;
-    addToCart(product.id, product.sizes[0] || 'Único', 1);
+    setQuickViewProduct(product);
   };
 
-  return (
-    <section id="catalog" className="max-w-[1280px] mx-auto px-6 md:px-10 py-10">
-      {/* Section Header */}
-      <div className="flex flex-wrap items-end justify-between gap-4 mb-6">
-        <div>
-          <p className="text-xs font-medium tracking-[0.14em] text-[#66635C] mb-1.5">
-            {cfg.catalogEyebrow}
-          </p>
-          <h2 className="font-serif text-3xl md:text-4xl font-medium text-[#141413]">
-            {cfg.catalogTitle}
-          </h2>
+  const scrollCarousel = (direction: 'left' | 'right') => {
+    const el = carouselRef.current;
+    if (!el) return;
+    const step = Math.max(280, Math.round(el.clientWidth * 0.72));
+    el.scrollBy({
+      left: direction === 'left' ? -step : step,
+      behavior: 'smooth',
+    });
+  };
+
+  const renderProductCard = (product: Product, wrapperClass = '') => {
+    const isWishlisted = wishlist.includes(product.id);
+    const outOfStock = product.stock <= 0;
+
+    return (
+      <article
+        key={product.id}
+        onClick={() => setQuickViewProduct(product)}
+        className={`group cursor-pointer rounded-[22px] bg-[#F3F3F3] p-3 sm:p-4 pb-4 sm:pb-5 flex flex-col transition-transform duration-200 hover:-translate-y-0.5 ${wrapperClass}`}
+      >
+        {/* Top Row: Wishlist Heart + Status label completely clear of the product photo */}
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleWishlist(product.id);
+            }}
+            aria-label={isWishlisted ? 'Remover dos favoritos' : 'Guardar nos favoritos'}
+            className="w-8 h-8 rounded-full bg-[#111111] text-white flex items-center justify-center shadow-xs hover:scale-105 transition-transform cursor-pointer shrink-0"
+          >
+            <Heart
+              className={`w-3.5 h-3.5 ${isWishlisted ? 'fill-white text-white' : 'text-white'}`}
+              strokeWidth={1.9}
+            />
+          </button>
+
+          {outOfStock ? (
+            <span className="text-[11px] font-medium text-[#666666]">Esgotado</span>
+          ) : product.onSale ? (
+            <span className="text-[11px] font-semibold text-[#111111]">Saldos</span>
+          ) : (
+            <span className="text-[11px] text-[#777777]">{product.category}</span>
+          )}
         </div>
 
-        <div className="flex items-center gap-4">
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
-            aria-label="Ordenar produtos"
-            className="bg-white border border-[#141413]/12 rounded-lg px-3 py-2 text-xs font-medium text-[#141413] focus:outline-none focus:border-[#141413] cursor-pointer"
-          >
-            <option value="featured">Destaques</option>
-            <option value="price-asc">Preço: Menor para Maior</option>
-            <option value="price-desc">Preço: Maior para Menor</option>
-            <option value="rating">Melhor Avaliação</option>
-          </select>
+        {/* Full Uncropped Product Image Area */}
+        <div className="w-full aspect-[3/4] rounded-[16px] overflow-hidden bg-white p-1.5 sm:p-2 mb-3.5 flex items-center justify-center">
+          <SafeImage
+            src={product.image}
+            alt={product.name}
+            className="w-full h-full object-contain object-center transition-transform duration-300 group-hover:scale-[1.03]"
+          />
+        </div>
+
+        {/* Product Info & Price Bar cleanly BELOW the photo (never overlapping) */}
+        <div className="mt-auto space-y-2.5 text-center px-1">
+          <h3 className="text-[13px] sm:text-[15px] font-medium text-[#111111] leading-snug line-clamp-2 min-h-[2.4em] flex items-center justify-center">
+            {product.name}
+          </h3>
+
+          <div className="flex items-center justify-center gap-2 tabular-nums">
+            <span className="text-xs sm:text-sm font-mono font-semibold text-[#111111]">
+              {formatMoney(product.price, settings.currencySymbol)}
+            </span>
+            {product.originalPrice && (
+              <span className="text-[11px] font-mono text-[#888888] line-through">
+                {formatMoney(product.originalPrice, settings.currencySymbol)}
+              </span>
+            )}
+          </div>
 
           <button
             type="button"
-            onClick={() => {
-              setSelectedCategory('Todos');
-              setSearchQuery('');
-            }}
-            className="hidden sm:inline-flex items-center gap-1.5 text-sm font-medium text-[#141413] hover:opacity-70 transition-opacity whitespace-nowrap shrink-0 cursor-pointer"
+            disabled={outOfStock}
+            onClick={(e) => handleQuickAdd(e, product)}
+            className="w-full py-2 px-3 rounded-full bg-[#111111] text-white text-[11px] sm:text-xs font-medium inline-flex items-center justify-center gap-1.5 hover:bg-[#2B2B2B] disabled:opacity-40 transition-colors cursor-pointer"
           >
-            <span>Ver Todos</span>
-            <ArrowRight className="w-4 h-4" />
+            <Plus className="w-3.5 h-3.5" />
+            <span>{outOfStock ? 'Indisponível' : 'Adicionar ao Saco'}</span>
           </button>
         </div>
-      </div>
+      </article>
+    );
+  };
 
-      {/* Segmented Interactive Filter Bar */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-2 mb-8">
-        {FILTER_TABS.map((cat) => {
-          const active = selectedCategory === cat;
-          return (
-            <button
-              key={cat}
-              type="button"
-              onClick={() => setSelectedCategory(cat)}
-              className={`px-3.5 py-2 text-xs font-medium rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                active
-                  ? 'bg-[#141413] text-[#F8F6F2]'
-                  : 'bg-[#EFECE5] text-[#524F49] hover:text-[#141413] hover:bg-[#E7E3DA]'
-              }`}
-            >
-              {cat}
-            </button>
-          );
-        })}
-      </div>
+  return (
+    <section
+      id="catalog"
+      className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 pt-4 pb-12 space-y-8"
+    >
+      {/* ALWAYS-VISIBLE HORIZONTAL CAROUSEL: "As Nossas Escolhas Favoritas" */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between gap-4">
+          <h2 className="text-[17px] sm:text-xl font-semibold text-[#111111] tracking-tight">
+            {cfg.catalogTitle || 'As Nossas Escolhas Favoritas'}
+          </h2>
 
-      {/* Empty State */}
-      {filteredProducts.length === 0 ? (
-        <div className="bg-white rounded-2xl border border-[#141413]/8 p-12 text-center">
-          <p className="font-serif text-xl text-[#141413] mb-2">
-            {products.length === 0
-              ? 'O catálogo da loja aguarda as primeiras peças'
-              : 'Nenhuma peça encontrada nesta seleção'}
-          </p>
-          <p className="text-sm text-[#66635C] mb-6">
-            {products.length === 0
-              ? 'Registe novos produtos no painel de Gestão para que apareçam automaticamente aqui.'
-              : 'Experimente limpar o filtro de pesquisa ou explorar toda a coleção.'}
-          </p>
-          {products.length === 0 ? (
-            <button
-              type="button"
-              onClick={() => setActiveAppView('admin')}
-              className="px-5 py-2.5 bg-[#141413] text-[#F8F6F2] text-xs font-medium rounded-lg hover:bg-[#2B2B29] transition-colors cursor-pointer"
-            >
-              Ir para Gestão & Registar Produto
-            </button>
-          ) : (
+          <div className="flex items-center gap-2 shrink-0">
+            {favoriteCarouselProducts.length > 1 && (
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => scrollCarousel('left')}
+                  aria-label="Rolar para a esquerda"
+                  className="w-8 h-8 rounded-full bg-[#EFEFEF] hover:bg-[#111111] hover:text-white text-[#111111] flex items-center justify-center transition-colors cursor-pointer"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => scrollCarousel('right')}
+                  aria-label="Rolar para a direita"
+                  className="w-8 h-8 rounded-full bg-[#EFEFEF] hover:bg-[#111111] hover:text-white text-[#111111] flex items-center justify-center transition-colors cursor-pointer"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
             <button
               type="button"
               onClick={() => {
+                onResetView();
                 setSelectedCategory('Todos');
                 setSearchQuery('');
               }}
-              className="px-5 py-2.5 bg-[#141413] text-[#F8F6F2] text-xs font-medium rounded-lg hover:bg-[#2B2B29] transition-colors cursor-pointer"
+              className="inline-flex items-center gap-0.5 text-xs sm:text-sm font-medium text-[#555555] hover:text-[#111111] transition-colors whitespace-nowrap shrink-0 cursor-pointer ml-1"
             >
-              Repor Filtros
+              <span>Ver Todos</span>
+              <ChevronRight className="w-3.5 h-3.5" />
             </button>
+          </div>
+        </div>
+
+        {favoriteCarouselProducts.length === 0 ? (
+          <div className="bg-[#F3F3F3] rounded-[22px] p-8 text-center">
+            <p className="text-sm sm:text-base font-semibold text-[#111111] mb-1">
+              O catálogo da loja aguarda as primeiras peças
+            </p>
+            <p className="text-xs sm:text-sm text-[#666666]">
+              Novas peças exclusivas serão apresentadas aqui em breve.
+            </p>
+          </div>
+        ) : (
+          <div
+            ref={carouselRef}
+            className="flex items-stretch gap-4 sm:gap-5 overflow-x-auto snap-x snap-mandatory scroll-smooth pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
+            {favoriteCarouselProducts.map((product) =>
+              renderProductCard(
+                product,
+                'w-[68%] sm:w-[44%] md:w-[31%] lg:w-[29.5%] shrink-0 snap-start'
+              )
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* FILTERABLE CATALOG GRID SECTION */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 overflow-x-auto pb-1">
+            {FILTER_TABS.map((cat) => {
+              const active = !wishlistOnly && selectedCategory === cat;
+              const label = cat === 'Todos' ? 'Novidades & Destaques' : cat;
+              return (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => {
+                    if (wishlistOnly) onResetView();
+                    setSelectedCategory(cat);
+                  }}
+                  className={`px-4 py-2 text-xs font-medium rounded-full transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                    active
+                      ? 'bg-[#111111] text-white'
+                      : 'bg-[#EFEFEF] text-[#333333] hover:bg-[#E4E4E4]'
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+
+          {products.length > 0 && (
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+              aria-label="Ordenar produtos"
+              className="hidden sm:block bg-[#EFEFEF] rounded-full px-3.5 py-2 text-xs font-medium text-[#111111] focus:outline-none cursor-pointer shrink-0"
+            >
+              <option value="featured">Destaques</option>
+              <option value="price-asc">Menor Preço</option>
+              <option value="price-desc">Maior Preço</option>
+            </select>
           )}
         </div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {filteredProducts.map((product) => {
-            const isWishlisted = wishlist.includes(product.id);
-            const outOfStock = product.stock <= 0;
 
-            return (
-              <article
-                key={product.id}
-                onClick={() => setQuickViewProduct(product)}
-                className="group cursor-pointer flex flex-col"
-              >
-                {/* Studio Product Image Surface */}
-                <div className="relative aspect-[3/4] rounded-xl overflow-hidden bg-[#F1EEE8] border border-[#141413]/6 mb-3.5">
-                  <SafeImage
-                    src={product.image}
-                    alt={product.name}
-                    className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
-                  />
+        {wishlistOnly && (
+          <div className="flex items-center justify-between">
+            <h3 className="text-base font-semibold text-[#111111]">
+              Favoritos ({filteredProducts.length})
+            </h3>
+            <button
+              type="button"
+              onClick={onResetView}
+              className="text-xs font-medium text-[#555555] hover:text-[#111111] cursor-pointer"
+            >
+              Mostrar todo o catálogo
+            </button>
+          </div>
+        )}
 
-                  {/* Subtle top-left text tag */}
-                  {(outOfStock || product.onSale || product.isNew) && (
-                    <span className="absolute top-3 left-3 text-[11px] font-medium tracking-wide text-[#141413] bg-[#F8F6F2]/90 backdrop-blur-sm px-2.5 py-1 rounded">
-                      {outOfStock ? 'Esgotado' : product.onSale ? 'Saldos' : 'Novo'}
-                    </span>
-                  )}
-
-                  {/* Wishlist Heart */}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggleWishlist(product.id);
-                    }}
-                    aria-label={isWishlisted ? 'Remover dos favoritos' : 'Guardar nos favoritos'}
-                    className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/90 flex items-center justify-center text-[#141413] hover:bg-white transition-colors cursor-pointer shadow-xs"
-                  >
-                    <Heart
-                      className={`w-4 h-4 ${isWishlisted ? 'fill-[#141413]' : ''}`}
-                      strokeWidth={1.6}
-                    />
-                  </button>
-
-                  {/* Hover Quick-Add CTA */}
-                  <div className="absolute inset-x-3 bottom-3 opacity-0 translate-y-1.5 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-200">
-                    <button
-                      type="button"
-                      disabled={outOfStock}
-                      onClick={(e) => handleQuickAdd(e, product)}
-                      className="w-full py-2.5 px-3 bg-[#141413]/95 text-[#F8F6F2] text-xs font-medium rounded-lg flex items-center justify-center gap-1.5 hover:bg-[#141413] disabled:opacity-50 cursor-pointer"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>{outOfStock ? 'Indisponível' : 'Adicionar ao Saco'}</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Clean Unboxed Metadata */}
-                <div className="flex items-center justify-between gap-2 text-[11px] text-[#66635C] mb-1">
-                  <span>{product.category}</span>
-                  <span>{product.stock > 0 ? `${product.stock} em stock` : 'Sem stock'}</span>
-                </div>
-
-                <h3 className="text-[15px] font-semibold text-[#141413] leading-snug mb-1 group-hover:underline underline-offset-4">
-                  {product.name}
-                </h3>
-
-                <div className="flex items-center justify-between gap-2 mt-auto pt-1">
-                  <div className="flex items-baseline gap-2 tabular-nums">
-                    <span className="text-[15px] font-semibold text-[#141413]">
-                      {formatMoney(product.price, settings.currencySymbol)}
-                    </span>
-                    {product.originalPrice && (
-                      <span className="text-xs text-[#8A857C] line-through">
-                        {formatMoney(product.originalPrice, settings.currencySymbol)}
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-1 text-xs text-[#524F49] tabular-nums">
-                    <Star className="w-3.5 h-3.5 fill-[#C29B53] text-[#C29B53]" />
-                    <span>{product.rating.toFixed(1)}</span>
-                    <span className="text-[#8A857C]">({product.reviewCount})</span>
-                  </div>
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      )}
+        {filteredProducts.length === 0 && products.length > 0 ? (
+          <div className="bg-[#F3F3F3] rounded-[22px] p-10 text-center">
+            <p className="text-base sm:text-lg font-semibold text-[#111111] mb-1.5">
+              {wishlistOnly
+                ? 'Ainda não guardou nenhum artigo nos favoritos'
+                : 'Nenhuma peça encontrada nesta seleção'}
+            </p>
+            <p className="text-xs sm:text-sm text-[#666666] mb-5">
+              Toque no coração de um artigo para guardar ou explore toda a coleção.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                onResetView();
+                setSelectedCategory('Todos');
+                setSearchQuery('');
+              }}
+              className="px-5 py-2.5 bg-[#111111] text-white text-xs font-medium rounded-full hover:bg-[#2A2A2A] transition-colors cursor-pointer"
+            >
+              Ver Todos os Artigos
+            </button>
+          </div>
+        ) : filteredProducts.length > 0 ? (
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+            {filteredProducts.map((product) => renderProductCard(product))}
+          </div>
+        ) : null}
+      </div>
     </section>
   );
 };

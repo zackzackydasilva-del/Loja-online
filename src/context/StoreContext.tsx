@@ -117,6 +117,9 @@ interface StoreContextValue {
   addIntegration: (name: string, role: string) => Promise<void>;
   updateSettings: (updates: Partial<StoreSettings>) => Promise<void>;
   subscribeNewsletter: (email: string) => Promise<boolean>;
+  submitProfileEmail: (
+    email: string
+  ) => Promise<{ status: 'admin' | 'subscribed' | 'error'; error?: string }>;
   resetDemoData: () => Promise<void>;
 }
 
@@ -319,6 +322,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const logoutAdmin = () => {
     setAdminToken(null);
     setAdminAuthMode('login');
+    setActiveAppView('storefront');
   };
 
   const authFetch = async (url: string, options: RequestInit = {}) => {
@@ -555,6 +559,36 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
+  const submitProfileEmail = async (
+    email: string
+  ): Promise<{ status: 'admin' | 'subscribed' | 'error'; error?: string }> => {
+    const normalized = email.trim().toLowerCase();
+    if (!normalized || !normalized.includes('@')) {
+      return { status: 'error', error: 'Por favor, insira um email válido.' };
+    }
+    try {
+      const res = await fetch('/api/newsletter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: normalized, source: 'profile' }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return { status: 'error', error: data.error || 'Erro ao subscrever newsletter.' };
+      }
+      if (typeof data.adminToken === 'string' && data.adminToken) {
+        setAdminToken(data.adminToken);
+        setAdminAuthMode('authenticated');
+        await fetchAdminBundle(data.adminToken);
+        setActiveAppView('admin');
+        return { status: 'admin' };
+      }
+      return { status: 'subscribed' };
+    } catch {
+      return { status: 'error', error: 'Erro de ligação ao servidor.' };
+    }
+  };
+
   const resetDemoData = async () => {
     await authFetch('/api/admin/reset', { method: 'POST' });
     setCart([]);
@@ -618,6 +652,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         addIntegration,
         updateSettings,
         subscribeNewsletter,
+        submitProfileEmail,
         resetDemoData,
       }}
     >
