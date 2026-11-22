@@ -470,12 +470,19 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const addProduct = async (product: Omit<Product, 'id' | 'rating' | 'reviewCount'>) => {
-    await authFetch('/api/admin/products', {
+    const res = await authFetch('/api/admin/products', {
       method: 'POST',
       body: JSON.stringify(product),
     });
-    await fetchPublicStore();
-    if (adminToken) await fetchAdminBundle(adminToken);
+    const created = (await res.json()) as Product;
+    if (created && created.id) {
+      setProducts((prev) => [created, ...prev.filter((p) => p.id !== created.id)]);
+    }
+    if (adminToken) {
+      await fetchAdminBundle(adminToken);
+    } else {
+      await fetchPublicStore();
+    }
   };
 
   const updateProduct = async (id: string, updates: Partial<Product>) => {
@@ -483,17 +490,25 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       method: 'PATCH',
       body: JSON.stringify(updates),
     });
-    await fetchPublicStore();
-    if (adminToken) await fetchAdminBundle(adminToken);
+    setProducts((prev) => prev.map((p) => (p.id === id ? { ...p, ...updates } : p)));
+    if (adminToken) {
+      await fetchAdminBundle(adminToken);
+    } else {
+      await fetchPublicStore();
+    }
   };
 
   const deleteProduct = async (id: string) => {
     await authFetch(`/api/admin/products/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     });
+    setProducts((prev) => prev.filter((p) => p.id !== id));
     setCart((prev) => prev.filter((c) => c.productId !== id));
-    await fetchPublicStore();
-    if (adminToken) await fetchAdminBundle(adminToken);
+    if (adminToken) {
+      await fetchAdminBundle(adminToken);
+    } else {
+      await fetchPublicStore();
+    }
   };
 
   const toggleGoal = async (goalId: string) => {

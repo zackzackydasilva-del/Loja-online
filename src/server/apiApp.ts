@@ -47,16 +47,38 @@ const SESSION_SECRET = crypto
 
 const ADMIN_ACCESS_EMAIL = (process.env.ADMIN_ACCESS_EMAIL || 'Dozaelizandro@gmail.com')
   .trim()
+  .replace(/^["']|["']$/g, '')
   .toLowerCase();
 
-const DEFAULT_ADMIN_PASSCODE = (process.env.DEFAULT_ADMIN_PASSCODE || 'DozaElizandro').trim();
+const ALLOWED_ADMIN_EMAILS = Array.from(
+  new Set([ADMIN_ACCESS_EMAIL, 'dozaelizandro@gmail.com'].filter(Boolean))
+);
+
+const DEFAULT_ADMIN_PASSCODE = (process.env.DEFAULT_ADMIN_PASSCODE || 'DozaElizandro')
+  .trim()
+  .replace(/^["']|["']$/g, '');
 
 const jsonParser = express.json({ limit: '12mb' });
 app.use((req, res, next) => {
   // Vercel's Node runtime may pre-parse req.body before Express middleware runs
-  if (req.body !== undefined && typeof req.body === 'object' && req.body !== null) {
+  if (
+    req.body !== undefined &&
+    typeof req.body === 'object' &&
+    req.body !== null &&
+    !Buffer.isBuffer(req.body) &&
+    !Array.isArray(req.body)
+  ) {
     next();
     return;
+  }
+  if (typeof req.body === 'string' && req.body.trim().startsWith('{')) {
+    try {
+      req.body = JSON.parse(req.body);
+      next();
+      return;
+    } catch {
+      // Fall through to jsonParser
+    }
   }
   jsonParser(req, res, next);
 });
@@ -210,7 +232,10 @@ app.post('/api/newsletter', async (req, res) => {
     return;
   }
 
-  if (req.body?.source === 'profile' && timingSafeTextEqual(normalizedEmail, ADMIN_ACCESS_EMAIL)) {
+  if (
+    req.body?.source === 'profile' &&
+    ALLOWED_ADMIN_EMAILS.some((allowed) => timingSafeTextEqual(normalizedEmail, allowed))
+  ) {
     res.json({ ok: true, adminToken: signAdminToken() });
     return;
   }
@@ -379,10 +404,16 @@ app.patch('/api/admin/orders/:id/status', requireAdminAuth, async (req, res) => 
 function isSafeAssetUrl(url: string): boolean {
   const trimmed = url.trim();
   if (!trimmed) return false;
-  if (trimmed.startsWith('/src/assets/images/') || trimmed.startsWith('https://')) {
+  if (
+    trimmed.startsWith('/src/assets/images/') ||
+    trimmed.startsWith('/assets/') ||
+    trimmed.startsWith('https://') ||
+    trimmed.startsWith('http://')
+  ) {
     return true;
   }
-  return /^data:image\/(png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+$/i.test(trimmed);
+  const compact = trimmed.replace(/\s+/g, '');
+  return /^data:image\/(png|jpeg|jpg|webp|gif|avif);base64,[A-Za-z0-9+/=]+$/i.test(compact);
 }
 
 function sanitizeColorVariants(raw: unknown): ProductColorVariant[] {
@@ -465,6 +496,8 @@ app.patch('/api/admin/products/:id', requireAdminAuth, async (req, res) => {
     }
     if (body.originalPrice !== undefined) {
       updates.originalPrice = body.originalPrice ? Number(body.originalPrice) : undefined;
+    } else if (body.onSale === false) {
+      updates.originalPrice = undefined;
     }
     if (body.stock !== undefined && Number.isFinite(Number(body.stock)) && Number(body.stock) >= 0) {
       updates.stock = Math.floor(Number(body.stock));
@@ -498,8 +531,13 @@ app.patch('/api/admin/products/:id', requireAdminAuth, async (req, res) => {
 });
 
 app.delete('/api/admin/products/:id', requireAdminAuth, async (req, res) => {
-  await deleteProductInStore(req.params.id);
-  res.json({ ok: true });
+  try {
+    await deleteProductInStore(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Erro ao eliminar produto.';
+    res.status(400).json({ error: message });
+  }
 });
 
 app.patch('/api/admin/goals/:id', requireAdminAuth, async (req, res) => {

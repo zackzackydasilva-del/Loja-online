@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { ArrowDownRight, ArrowUpRight, Edit2, Plus, Trash2 } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import { Product } from '../../types/store';
@@ -17,6 +17,8 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
   onNewProduct,
 }) => {
   const { products, stockMovements, updateProduct, deleteProduct, settings } = useStore();
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     const q = searchFilter.trim().toLowerCase();
@@ -135,24 +137,52 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                         </div>
                       </td>
                       <td className="py-3 px-5 text-right">
-                        <div className="inline-flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => onEditProduct(product)}
-                            aria-label={`Editar ${product.name}`}
-                            className="p-2 rounded-xl hover:bg-[#F2F1EE] text-[#1C1C1E] cursor-pointer"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => deleteProduct(product.id)}
-                            aria-label={`Eliminar ${product.name}`}
-                            className="p-2 rounded-xl hover:bg-red-50 text-red-700 cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                        {pendingDeleteId === product.id ? (
+                          <div className="inline-flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              disabled={deletingId === product.id}
+                              onClick={async () => {
+                                setDeletingId(product.id);
+                                try {
+                                  await deleteProduct(product.id);
+                                } finally {
+                                  setDeletingId(null);
+                                  setPendingDeleteId(null);
+                                }
+                              }}
+                              className="px-2.5 py-1 rounded-full bg-red-600 text-white text-[11px] font-medium hover:bg-red-700 disabled:opacity-50 cursor-pointer"
+                            >
+                              {deletingId === product.id ? 'A eliminar...' : 'Confirmar'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setPendingDeleteId(null)}
+                              className="px-2 py-1 rounded-full bg-[#F2F1EE] text-[#555552] text-[11px] font-medium hover:bg-[#E5E4DF] cursor-pointer"
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="inline-flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => onEditProduct(product)}
+                              aria-label={`Editar ${product.name}`}
+                              className="p-2 rounded-xl hover:bg-[#F2F1EE] text-[#1C1C1E] cursor-pointer"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setPendingDeleteId(product.id)}
+                              aria-label={`Eliminar ${product.name}`}
+                              className="p-2 rounded-xl hover:bg-red-50 text-red-700 cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   );

@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import {
   bootstrapSupabaseSchemaIfMissing,
@@ -219,6 +220,75 @@ function getSupabaseClient(): SupabaseClient | null {
     });
   }
   return cachedClient;
+}
+
+function assertPersistenceAvailable(supabase: SupabaseClient | null) {
+  if (!supabase && (process.env.VERCEL || process.env.NODE_ENV === 'production')) {
+    throw new Error(
+      'Base de dados Supabase não conectada neste deployment. Configure SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY nas variáveis de ambiente do servidor.'
+    );
+  }
+}
+
+const MEDIA_BUCKET = 'store-media';
+let mediaBucketReady = false;
+
+async function ensureMediaBucket(supabase: SupabaseClient): Promise<boolean> {
+  if (mediaBucketReady) return true;
+  try {
+    const { data: buckets } = await supabase.storage.listBuckets();
+    if (buckets?.some((b) => b.name === MEDIA_BUCKET)) {
+      mediaBucketReady = true;
+      return true;
+    }
+    const { error } = await supabase.storage.createBucket(MEDIA_BUCKET, {
+      public: true,
+      fileSizeLimit: 5 * 1024 * 1024,
+      allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif'],
+    });
+    if (!error || error.message.toLowerCase().includes('already exists')) {
+      mediaBucketReady = true;
+      return true;
+    }
+  } catch {
+    // Fallback gracefully to inline base64
+  }
+  return false;
+}
+
+async function persistImageAsset(
+  supabase: SupabaseClient,
+  value: string,
+  folder = 'products'
+): Promise<string> {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('data:image/')) {
+    return trimmed;
+  }
+  const match = trimmed.match(/^data:(image\/[a-z0-9.+-]+);base64,([\s\S]+)$/i);
+  if (!match) return trimmed;
+  try {
+    const ready = await ensureMediaBucket(supabase);
+    if (!ready) return trimmed;
+    const mime = match[1].toLowerCase();
+    const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg';
+    const base64Body = match[2].replace(/\s+/g, '');
+    const buffer = Buffer.from(base64Body, 'base64');
+    if (buffer.length === 0) return trimmed;
+
+    const hash = crypto.createHash('sha1').update(buffer).digest('hex').slice(0, 16);
+    const filePath = `${folder}/${hash}.${ext}`;
+    const { error } = await supabase.storage.from(MEDIA_BUCKET).upload(filePath, buffer, {
+      contentType: mime,
+      upsert: true,
+      cacheControl: '31536000',
+    });
+    if (error) return trimmed;
+    const { data } = supabase.storage.from(MEDIA_BUCKET).getPublicUrl(filePath);
+    return data?.publicUrl || trimmed;
+  } catch {
+    return trimmed;
+  }
 }
 
 export function isSupabaseConfigured(): boolean {
@@ -1351,30 +1421,52 @@ export async function updateOrderStatusInStore(orderId: string, status: OrderSta
 export async function createProductInStore(
   product: Omit<Product, 'id' | 'rating' | 'reviewCount'>
 ): Promise<Product> {
+  const uniqueSuffix = Math.floor(Math.random() * 1000)
+    .toString()
+    .padStart(3, '0');
   const created: Product = {
     ...product,
-    id: `prod-${Date.now()}`,
+    id: `prod-${Date.now()}-${uniqueSuffix}`,
     rating: 5.0,
     reviewCount: 1,
   };
 
   const supabase = getSupabaseClient();
+  assertPersistenceAvailable(supabase);
   if (supabase) {
     await ensureSupabaseSeeded(supabase).catch(() => false);
+
+    created.image = await persistImageAsset(supabase, created.image, 'products');
+    if (created.colorVariants && created.colorVariants.length > 0) {
+      created.colorVariants = await Promise.all(
+        created.colorVariants.map(async (v) => ({
+          ...v,
+          image: await persistImageAsset(supabase, v.image, 'products'),
+        }))
+      );
+    }
+
     const slug = created.category
       .toLowerCase()
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '');
-    await supabase.from('categories').upsert(
-      {
-        slug,
-        name: created.category,
-        sort_order: 9,
-      },
-      { onConflict: 'slug' }
-    );
+    await supabase
+      .from('categories')
+      .upsert(
+        {
+          slug,
+          name: created.category,
+          sort_order: 9,
+        },
+        { onConflict: 'slug' }
+      )
+      .then(() => {}, () => {});
 
-    const { error } = await supabase.from('products').insert(mapProductToRow(created));
+    const { data: inserted, error } = await supabase
+      .from('products')
+      .insert(mapProductToRow(created))
+      .select('*')
+      .single();
     if (error) {
       if (error.code === '23505') {
         throw new Error(`Já existe um produto registado com o SKU ${created.sku}.`);
@@ -1382,15 +1474,18 @@ export async function createProductInStore(
       throw new Error(`Não foi possível registar o produto na base de dados (${error.message}).`);
     }
 
-    await supabase.from('stock_movements').insert({
-      id: `mov-reg-${created.id}`,
-      product_id: created.id,
-      order_id: null,
-      delta: created.stock,
-      reason: 'Registo de novo produto',
-    });
+    await supabase
+      .from('stock_movements')
+      .insert({
+        id: `mov-reg-${created.id}`,
+        product_id: created.id,
+        order_id: null,
+        delta: created.stock,
+        reason: 'Registo de novo produto',
+      })
+      .then(() => {}, () => {});
 
-    return created;
+    return inserted ? mapProductFromRow(inserted as Record<string, unknown>) : created;
   }
 
   if (memoryStore.products.some((p) => p.sku.toLowerCase() === created.sku.toLowerCase())) {
@@ -1409,6 +1504,7 @@ export async function createProductInStore(
 
 export async function updateProductInStore(id: string, updates: Partial<Product>) {
   const supabase = getSupabaseClient();
+  assertPersistenceAvailable(supabase);
   if (supabase) {
     await ensureSupabaseSeeded(supabase).catch(() => false);
     const { data: existing } = await supabase
@@ -1418,14 +1514,17 @@ export async function updateProductInStore(id: string, updates: Partial<Product>
       .maybeSingle();
 
     if (updates.category) {
-      await supabase.from('categories').upsert(
-        {
-          slug: updates.category.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''),
-          name: updates.category,
-          sort_order: 9,
-        },
-        { onConflict: 'slug' }
-      );
+      await supabase
+        .from('categories')
+        .upsert(
+          {
+            slug: updates.category.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''),
+            name: updates.category,
+            sort_order: 9,
+          },
+          { onConflict: 'slug' }
+        )
+        .then(() => {}, () => {});
     }
 
     const rowUpdates: Record<string, unknown> = {};
@@ -1433,13 +1532,21 @@ export async function updateProductInStore(id: string, updates: Partial<Product>
     if (updates.name !== undefined) rowUpdates.name = updates.name;
     if (updates.category !== undefined) rowUpdates.category = updates.category;
     if (updates.price !== undefined) rowUpdates.price = updates.price;
-    if (updates.originalPrice !== undefined) rowUpdates.original_price = updates.originalPrice;
+    if ('originalPrice' in updates) {
+      rowUpdates.original_price = updates.originalPrice ?? null;
+    }
     if (updates.stock !== undefined) rowUpdates.stock = updates.stock;
     if (updates.sizes !== undefined) rowUpdates.sizes = updates.sizes;
     if (updates.colorVariants !== undefined) {
+      const persistedVariants = await Promise.all(
+        updates.colorVariants.map(async (v) => ({
+          ...v,
+          image: await persistImageAsset(supabase, v.image, 'products'),
+        }))
+      );
       rowUpdates.colors =
-        updates.colorVariants.length > 0
-          ? updates.colorVariants
+        persistedVariants.length > 0
+          ? persistedVariants
           : updates.colors && updates.colors.length > 0
           ? updates.colors
           : ['Neutro'];
@@ -1448,24 +1555,39 @@ export async function updateProductInStore(id: string, updates: Partial<Product>
     }
     if (updates.description !== undefined) rowUpdates.description = updates.description;
     if (updates.material !== undefined) rowUpdates.material = updates.material;
-    if (updates.image !== undefined) rowUpdates.image = updates.image;
+    if (updates.image !== undefined) {
+      rowUpdates.image = await persistImageAsset(supabase, updates.image, 'products');
+    }
     if (updates.isNew !== undefined) rowUpdates.is_new = updates.isNew;
     if (updates.onSale !== undefined) rowUpdates.on_sale = updates.onSale;
 
-    const { error } = await supabase.from('products').update(rowUpdates).eq('id', id);
+    const { data: updatedRows, error } = await supabase
+      .from('products')
+      .update(rowUpdates)
+      .eq('id', id)
+      .select('id');
     if (error) {
-      throw new Error('Erro ao atualizar produto na base de dados.');
+      if (error.code === '23505') {
+        throw new Error(`Já existe outro produto registado com esse SKU.`);
+      }
+      throw new Error(`Erro ao atualizar produto na base de dados (${error.message}).`);
+    }
+    if (!updatedRows || updatedRows.length === 0) {
+      throw new Error('Produto não encontrado na base de dados.');
     }
 
     if (existing && updates.stock !== undefined && updates.stock !== Number(existing.stock)) {
       const delta = updates.stock - Number(existing.stock);
-      await supabase.from('stock_movements').insert({
-        id: `mov-upd-${Date.now()}`,
-        product_id: id,
-        order_id: null,
-        delta,
-        reason: delta > 0 ? 'Reposição de stock no painel' : 'Ajuste manual de stock',
-      });
+      await supabase
+        .from('stock_movements')
+        .insert({
+          id: `mov-upd-${Date.now()}`,
+          product_id: id,
+          order_id: null,
+          delta,
+          reason: delta > 0 ? 'Reposição de stock no painel' : 'Ajuste manual de stock',
+        })
+        .then(() => {}, () => {});
     }
     return;
   }
@@ -1488,9 +1610,13 @@ export async function updateProductInStore(id: string, updates: Partial<Product>
 
 export async function deleteProductInStore(id: string) {
   const supabase = getSupabaseClient();
+  assertPersistenceAvailable(supabase);
   if (supabase) {
     await ensureSupabaseSeeded(supabase).catch(() => false);
-    await supabase.from('products').delete().eq('id', id);
+    const { error } = await supabase.from('products').delete().eq('id', id);
+    if (error) {
+      throw new Error(`Erro ao eliminar produto da base de dados (${error.message}).`);
+    }
     return;
   }
   memoryStore.products = memoryStore.products.filter((p) => p.id !== id);
@@ -1582,6 +1708,7 @@ export async function updateSettingsInStore(updates: Partial<StoreSettings>) {
     memoryStore.settings.storefrontConfig = mergeStorefrontConfig(updates.storefrontConfig);
   }
   const supabase = getSupabaseClient();
+  assertPersistenceAvailable(supabase);
   if (supabase) {
     await ensureSupabaseSeeded(supabase).catch(() => false);
     const rowUpdates: Record<string, unknown> = {};
@@ -1593,7 +1720,39 @@ export async function updateSettingsInStore(updates: Partial<StoreSettings>) {
     if (updates.supportEmail !== undefined) rowUpdates.support_email = updates.supportEmail;
     if (updates.integrations !== undefined) rowUpdates.integrations = updates.integrations;
     if (updates.storefrontConfig !== undefined && hasStorefrontConfigCol) {
-      rowUpdates.storefront_config = mergeStorefrontConfig(updates.storefrontConfig);
+      const merged = mergeStorefrontConfig(updates.storefrontConfig);
+      merged.heroSlides = await Promise.all(
+        merged.heroSlides.map(async (s) => ({
+          ...s,
+          image: await persistImageAsset(supabase, s.image, 'banners'),
+        }))
+      );
+      merged.categoryStripItems = await Promise.all(
+        merged.categoryStripItems.map(async (c) => ({
+          ...c,
+          image: c.image ? await persistImageAsset(supabase, c.image, 'banners') : '',
+        }))
+      );
+      merged.editorialCards = await Promise.all(
+        merged.editorialCards.map(async (c) => ({
+          ...c,
+          image: await persistImageAsset(supabase, c.image, 'banners'),
+        }))
+      );
+      merged.promoBanners = await Promise.all(
+        merged.promoBanners.map(async (b) => ({
+          ...b,
+          image: await persistImageAsset(supabase, b.image, 'banners'),
+        }))
+      );
+      if (merged.newsletter?.image) {
+        merged.newsletter.image = await persistImageAsset(
+          supabase,
+          merged.newsletter.image,
+          'banners'
+        );
+      }
+      rowUpdates.storefront_config = merged;
     }
     if (Object.keys(rowUpdates).length > 0) {
       const { data, error } = await supabase
