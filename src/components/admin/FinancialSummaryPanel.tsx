@@ -3,6 +3,7 @@ import { FileText, Plus, Receipt, Trash2, Wallet } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import { OrderStatus, StoreCost, StoreCostCategory, StoreOrder } from '../../types/store';
 import { formatMoney } from '../../utils/currency';
+import { formatLocalIsoDate } from '../../utils/weeklyAnalytics';
 import { OrderInvoiceModal } from './OrderInvoiceModal';
 
 const COST_CATEGORIES: StoreCostCategory[] = [
@@ -34,7 +35,7 @@ export const FinancialSummaryPanel: React.FC<FinancialSummaryPanelProps> = ({
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState<StoreCostCategory>('Mercadoria');
   const [amount, setAmount] = useState('');
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => formatLocalIsoDate());
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [invoiceOrderId, setInvoiceOrderId] = useState<string | null>(null);
@@ -69,15 +70,25 @@ export const FinancialSummaryPanel: React.FC<FinancialSummaryPanelProps> = ({
         title: title.trim(),
         category,
         amount: parsedAmount,
-        date: date || new Date().toISOString().slice(0, 10),
+        date: date || formatLocalIsoDate(),
       });
       setTitle('');
       setAmount('');
+      setDate(formatLocalIsoDate());
       setCostFormOpen(false);
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Erro ao registar custo.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDeleteCost = async (costId: string) => {
+    setErrorMsg('');
+    try {
+      await deleteCost(costId);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Erro ao eliminar custo.');
     }
   };
 
@@ -331,7 +342,7 @@ export const FinancialSummaryPanel: React.FC<FinancialSummaryPanelProps> = ({
                     </span>
                     <button
                       type="button"
-                      onClick={() => deleteCost(cost.id)}
+                      onClick={() => handleDeleteCost(cost.id)}
                       aria-label={`Eliminar custo ${cost.title}`}
                       className="p-1.5 rounded-lg hover:bg-red-50 text-red-700 cursor-pointer"
                     >

@@ -170,6 +170,11 @@ function mergeStorefrontConfigPatch(
 }
 
 const STOREFRONT_CONFIG_META_ID = '__lunora_storefront_config__';
+const STORE_COSTS_META_ID = '__lunora_store_costs__';
+
+function isMetaIntegrationId(id: unknown): boolean {
+  return id === STOREFRONT_CONFIG_META_ID || id === STORE_COSTS_META_ID;
+}
 
 function isMissingStorefrontColError(err: { code?: string; message?: string } | null | undefined): boolean {
   if (!err) return false;
@@ -180,15 +185,32 @@ function isMissingStorefrontColError(err: { code?: string; message?: string } | 
   );
 }
 
+function normalizeEmbeddedCost(item: unknown): StoreCost | null {
+  if (!item || typeof item !== 'object') return null;
+  const rec = item as Record<string, unknown>;
+  const id = String(rec.id || '').trim();
+  const title = String(rec.title || '').trim();
+  if (!id || !title) return null;
+  return {
+    id,
+    title,
+    category: (String(rec.category || 'Operacional') as StoreCostCategory) || 'Operacional',
+    amount: +Math.max(0, Number(rec.amount) || 0).toFixed(2),
+    date: String(rec.date || rec.cost_date || new Date().toISOString().slice(0, 10)),
+  };
+}
+
 function extractIntegrationsAndConfig(rawIntegrations: unknown): {
   integrations: StoreSettings['integrations'];
   embeddedConfig: Partial<StorefrontConfig> | null;
+  embeddedCosts: StoreCost[];
 } {
   if (!Array.isArray(rawIntegrations)) {
-    return { integrations: [], embeddedConfig: null };
+    return { integrations: [], embeddedConfig: null, embeddedCosts: [] };
   }
   const integrations: StoreSettings['integrations'] = [];
   let embeddedConfig: Partial<StorefrontConfig> | null = null;
+  let embeddedCosts: StoreCost[] = [];
   for (const item of rawIntegrations) {
     if (item && typeof item === 'object') {
       const rec = item as Record<string, unknown>;
@@ -198,28 +220,46 @@ function extractIntegrationsAndConfig(rawIntegrations: unknown): {
         }
         continue;
       }
+      if (rec.id === STORE_COSTS_META_ID) {
+        if (Array.isArray(rec.costs)) {
+          embeddedCosts = rec.costs
+            .map(normalizeEmbeddedCost)
+            .filter((c): c is StoreCost => c !== null);
+        }
+        continue;
+      }
       integrations.push(item as StoreSettings['integrations'][number]);
     }
   }
-  return { integrations, embeddedConfig };
+  return { integrations, embeddedConfig, embeddedCosts };
 }
 
 function packIntegrationsWithConfig(
   visibleIntegrations: StoreSettings['integrations'],
-  config: StorefrontConfig | null
+  config: StorefrontConfig | null,
+  costs: StoreCost[] = []
 ): unknown[] {
-  const clean = visibleIntegrations.filter((i) => i && i.id !== STOREFRONT_CONFIG_META_ID);
-  if (!config) return clean;
-  return [
-    ...clean,
-    {
+  const clean = visibleIntegrations.filter((i) => i && !isMetaIntegrationId(i.id));
+  const packed: unknown[] = [...clean];
+  if (config) {
+    packed.push({
       id: STOREFRONT_CONFIG_META_ID,
       name: 'storefront_config',
       role: 'system',
       connected: false,
       config,
-    },
-  ];
+    });
+  }
+  if (costs.length > 0) {
+    packed.push({
+      id: STORE_COSTS_META_ID,
+      name: 'store_costs',
+      role: 'system',
+      connected: false,
+      costs: costs.slice(0, 500),
+    });
+  }
+  return packed;
 }
 
 function resolveStorefrontFromRow(row: Record<string, unknown> | null): StorefrontConfig | null {
@@ -1012,7 +1052,8 @@ export async function getAdminBundle() {
   const supabase = getSupabaseClient();
   if (supabase) {
     await ensureSupabaseSeeded(supabase).catch(() => false);
-    const [prodRes, ordRes, itemRes, custRes, movRes, goalRes, taskRes, campRes, salesRes, setRes, newsRes, costRes] =
+    const costsReady = await ensureStoreCostsTableReady(supabase).catch(() => hasStoreCostsTable);
+    const [prodRes, ordRes, itemRes, custRes, movRes, goalRes, taskRes, campRes, salesRes, setRes, newsRes, initialCostRes] =
       await Promise.all([
         supabase.from('products').select('*').order('created_at', { ascending: false }),
         supabase.from('orders').select('*').order('id', { ascending: false }),
@@ -1025,10 +1066,15 @@ export async function getAdminBundle() {
         supabase.from('weekly_sales').select('*').order('day_index', { ascending: true }),
         supabase.from('store_settings').select('*').eq('id', 1).maybeSingle(),
         supabase.from('newsletter_subscribers').select('email'),
-        hasStoreCostsTable
+        costsReady
           ? supabase.from('store_costs').select('*').order('created_at', { ascending: false })
           : Promise.resolve({ data: null, error: null }),
       ]);
+
+    let costRes = initialCostRes;
+    if (costsReady && costRes.error) {
+      costRes = await supabase.from('store_costs').select('*');
+    }
 
     if (!prodRes.error && !ordRes.error) {
       const itemsByOrder = new Map<string, OrderItemSummary[]>();
@@ -1112,16 +1158,48 @@ export async function getAdminBundle() {
               accessories: Number(w.accessories),
               deltaPercent: Number(w.delta_percent),
             })),
-        costs:
-          hasStoreCostsTable && costRes.data
-            ? (costRes.data as Record<string, unknown>[]).map((c) => ({
-                id: String(c.id),
-                title: String(c.title),
-                category: String(c.category) as StoreCostCategory,
-                amount: Number(c.amount),
-                date: String(c.cost_date),
-              }))
-            : memoryStore.costs,
+        costs: (() => {
+          const tableCosts: StoreCost[] =
+            costsReady && !costRes.error && Array.isArray(costRes.data)
+              ? (costRes.data as Record<string, unknown>[]).map((c) => ({
+                  id: String(c.id),
+                  title: String(c.title),
+                  category: String(c.category) as StoreCostCategory,
+                  amount: Number(c.amount),
+                  date: String(c.cost_date),
+                }))
+              : [];
+          const { embeddedCosts } = extractIntegrationsAndConfig(
+            (setRes.data as Record<string, unknown> | null)?.integrations
+          );
+          const mergedMap = new Map<string, StoreCost>();
+          tableCosts.forEach((c) => mergedMap.set(c.id, c));
+          const missingInTable: StoreCost[] = [];
+          embeddedCosts.forEach((c) => {
+            if (!mergedMap.has(c.id)) {
+              mergedMap.set(c.id, c);
+              missingInTable.push(c);
+            }
+          });
+          if (costsReady && !costRes.error && missingInTable.length > 0) {
+            void supabase
+              .from('store_costs')
+              .upsert(
+                missingInTable.map((c) => ({
+                  id: c.id,
+                  title: c.title,
+                  category: c.category,
+                  amount: c.amount,
+                  cost_date: c.date,
+                })),
+                { onConflict: 'id' }
+              )
+              .then(() => undefined, () => undefined);
+          }
+          const resolvedCosts = Array.from(mergedMap.values());
+          memoryStore.costs = resolvedCosts;
+          return resolvedCosts;
+        })(),
         settings: setRes.data
           ? (() => {
               const row = setRes.data as Record<string, unknown>;
@@ -2139,15 +2217,16 @@ export async function updateSettingsInStore(
       .eq('id', 1)
       .maybeSingle();
     const currentRow = currentRowData as Record<string, unknown> | null;
-    const { integrations: currentIntegrations } = extractIntegrationsAndConfig(
-      currentRow?.integrations
-    );
+    const {
+      integrations: currentIntegrations,
+      embeddedCosts: currentEmbeddedCosts,
+    } = extractIntegrationsAndConfig(currentRow?.integrations);
     const currentStorefrontConfig =
       resolveStorefrontFromRow(currentRow) || memoryStore.settings.storefrontConfig;
 
     const nextIntegrations =
       updates.integrations !== undefined
-        ? updates.integrations.filter((i) => i && i.id !== STOREFRONT_CONFIG_META_ID)
+        ? updates.integrations.filter((i) => i && !isMetaIntegrationId(i.id))
         : currentIntegrations;
 
     let nextStorefrontConfig: StorefrontConfig | null = null;
@@ -2206,7 +2285,11 @@ export async function updateSettingsInStore(
 
     if (hasStorefrontConfigCol) {
       if (updates.integrations !== undefined) {
-        rowUpdates.integrations = nextIntegrations;
+        rowUpdates.integrations = packIntegrationsWithConfig(
+          nextIntegrations,
+          null,
+          currentEmbeddedCosts
+        );
       }
       if (nextStorefrontConfig) {
         rowUpdates.storefront_config = nextStorefrontConfig;
@@ -2214,7 +2297,11 @@ export async function updateSettingsInStore(
     } else {
       const configToEmbed = nextStorefrontConfig || currentStorefrontConfig;
       if (updates.integrations !== undefined || nextStorefrontConfig) {
-        rowUpdates.integrations = packIntegrationsWithConfig(nextIntegrations, configToEmbed);
+        rowUpdates.integrations = packIntegrationsWithConfig(
+          nextIntegrations,
+          configToEmbed,
+          currentEmbeddedCosts
+        );
       }
     }
 
@@ -2249,7 +2336,11 @@ export async function updateSettingsInStore(
             hasStorefrontConfigCol = false;
             delete rowUpdates.storefront_config;
             const configToEmbed = nextStorefrontConfig || currentStorefrontConfig;
-            rowUpdates.integrations = packIntegrationsWithConfig(nextIntegrations, configToEmbed);
+            rowUpdates.integrations = packIntegrationsWithConfig(
+              nextIntegrations,
+              configToEmbed,
+              currentEmbeddedCosts
+            );
             res = await supabase
               .from('store_settings')
               .update(rowUpdates)
@@ -2354,6 +2445,87 @@ export async function saveAdminPasswordHash(hash: string): Promise<void> {
   }
 }
 
+async function ensureStoreCostsTableReady(supabase: SupabaseClient): Promise<boolean> {
+  await ensureSupabaseSeeded(supabase).catch(() => false);
+  const probe = await supabase.from('store_costs').select('id').limit(1);
+  if (!probe.error) {
+    hasStoreCostsTable = true;
+    return true;
+  }
+
+  const { url, key } = getCleanedSupabaseEnv();
+  const urlRefMatch = url?.match(/^https?:\/\/([a-z0-9-]+)\.supabase\.co/i);
+  const projectRef = urlRefMatch?.[1] || extractProjectRefFromJwt(key);
+  if (projectRef) {
+    await executeSupabaseSql(
+      projectRef,
+      `
+      CREATE TABLE IF NOT EXISTS public.store_costs (
+        id text primary key,
+        title text not null,
+        category text not null default 'Operacional',
+        amount numeric(12, 2) not null check (amount >= 0),
+        cost_date text not null,
+        created_at timestamptz not null default now()
+      );
+      CREATE INDEX IF NOT EXISTS idx_store_costs_date ON public.store_costs(cost_date);
+      ALTER TABLE public.store_costs DISABLE ROW LEVEL SECURITY;
+      GRANT ALL ON public.store_costs TO anon, authenticated, service_role;
+      `.trim()
+    ).catch(() => false);
+    const reProbe = await supabase.from('store_costs').select('id').limit(1);
+    hasStoreCostsTable = !reProbe.error;
+    return hasStoreCostsTable;
+  }
+
+  hasStoreCostsTable = false;
+  return false;
+}
+
+async function syncEmbeddedCostsToSettings(
+  supabase: SupabaseClient,
+  updater: (current: StoreCost[]) => StoreCost[]
+): Promise<boolean> {
+  const { data: currentRowData } = await supabase
+    .from('store_settings')
+    .select('integrations')
+    .eq('id', 1)
+    .maybeSingle();
+  const currentRow = currentRowData as Record<string, unknown> | null;
+  const {
+    integrations: currentIntegrations,
+    embeddedConfig: currentEmbeddedConfig,
+    embeddedCosts,
+  } = extractIntegrationsAndConfig(currentRow?.integrations);
+
+  const nextCosts = updater(embeddedCosts);
+  const nextIntegrations = packIntegrationsWithConfig(
+    currentIntegrations,
+    currentEmbeddedConfig ? mergeStorefrontConfig(currentEmbeddedConfig) : null,
+    nextCosts
+  );
+
+  const { error } = await supabase
+    .from('store_settings')
+    .update({ integrations: nextIntegrations })
+    .eq('id', 1);
+
+  if (!error) return true;
+
+  const { error: upsertErr } = await supabase.from('store_settings').upsert(
+    {
+      id: 1,
+      store_name: INITIAL_SETTINGS.storeName,
+      currency_symbol: INITIAL_SETTINGS.currencySymbol,
+      free_shipping_threshold: INITIAL_SETTINGS.freeShippingThreshold,
+      support_email: INITIAL_SETTINGS.supportEmail,
+      integrations: nextIntegrations,
+    },
+    { onConflict: 'id' }
+  );
+  return !upsertErr;
+}
+
 export async function addCostInStore(input: {
   title: string;
   category: StoreCostCategory;
@@ -2369,34 +2541,62 @@ export async function addCostInStore(input: {
   };
 
   const supabase = getSupabaseClient();
+  assertPersistenceAvailable(supabase);
+
   if (supabase) {
-    await ensureSupabaseSeeded(supabase).catch(() => false);
-    if (hasStoreCostsTable) {
-      const { error } = await supabase.from('store_costs').insert({
-        id: cost.id,
-        title: cost.title,
-        category: cost.category,
-        amount: cost.amount,
-        cost_date: cost.date,
-      });
-      if (error) {
-        throw new Error('Falha ao registar custo na base de dados.');
+    const tableReady = await ensureStoreCostsTableReady(supabase).catch(() => false);
+    let savedToTable = false;
+
+    if (tableReady) {
+      const { error } = await supabase.from('store_costs').upsert(
+        {
+          id: cost.id,
+          title: cost.title,
+          category: cost.category,
+          amount: cost.amount,
+          cost_date: cost.date,
+        },
+        { onConflict: 'id' }
+      );
+      if (!error) {
+        savedToTable = true;
+      } else {
+        console.warn('store_costs upsert warning, using settings mirror:', error.message);
       }
-      return cost;
     }
+
+    const mirroredToSettings = await syncEmbeddedCostsToSettings(supabase, (prev) => [
+      cost,
+      ...prev.filter((c) => c.id !== cost.id),
+    ]).catch(() => false);
+
+    if (!savedToTable && !mirroredToSettings) {
+      throw new Error('Falha ao registar custo na base de dados.');
+    }
+
+    memoryStore.costs = [cost, ...memoryStore.costs.filter((c) => c.id !== cost.id)];
+    return cost;
   }
 
-  memoryStore.costs = [cost, ...memoryStore.costs];
+  memoryStore.costs = [cost, ...memoryStore.costs.filter((c) => c.id !== cost.id)];
   return cost;
 }
 
 export async function deleteCostInStore(id: string) {
   const supabase = getSupabaseClient();
+  assertPersistenceAvailable(supabase);
+
   if (supabase) {
-    await ensureSupabaseSeeded(supabase).catch(() => false);
-    if (hasStoreCostsTable) {
-      await supabase.from('store_costs').delete().eq('id', id);
+    const tableReady = await ensureStoreCostsTableReady(supabase).catch(() => false);
+    if (tableReady) {
+      const { error } = await supabase.from('store_costs').delete().eq('id', id);
+      if (error) {
+        console.warn('store_costs delete warning:', error.message);
+      }
     }
+    await syncEmbeddedCostsToSettings(supabase, (prev) => prev.filter((c) => c.id !== id)).catch(
+      () => false
+    );
   }
   memoryStore.costs = memoryStore.costs.filter((c) => c.id !== id);
 }
@@ -2431,6 +2631,7 @@ export async function resetDemoDataInStore() {
     if (hasStoreCostsTable) {
       await supabase.from('store_costs').delete().neq('id', '');
     }
+    await syncEmbeddedCostsToSettings(supabase, () => []).catch(() => false);
     if (hasAnalyticsTables) {
       await supabase.from('store_presence').delete().neq('session_id', '');
       await supabase.from('store_analytics_events').delete().neq('id', '');
