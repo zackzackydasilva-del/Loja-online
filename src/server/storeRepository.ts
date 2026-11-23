@@ -30,6 +30,7 @@ import {
   INITIAL_SETTINGS,
   WEEKLY_SALES_DATA,
 } from '../data/seedData.ts';
+import { computeCurrentWeekStats } from '../utils/weeklyAnalytics.ts';
 
 const CATEGORIES_SEED: { slug: string; name: ProductCategory; sort_order: number }[] = [
   { slug: 'mulher', name: 'Mulher', sort_order: 1 },
@@ -114,6 +115,36 @@ function mergeStorefrontConfig(raw: unknown): StorefrontConfig {
           : DEFAULT_STOREFRONT_CONFIG.footer.atelierLinks,
     },
   };
+}
+
+function mergeStorefrontConfigPatch(
+  base: StorefrontConfig,
+  patch: Partial<StorefrontConfig>
+): StorefrontConfig {
+  return mergeStorefrontConfig({
+    ...base,
+    ...patch,
+    navLabels: {
+      ...base.navLabels,
+      ...(patch.navLabels || {}),
+    },
+    newsletter: {
+      ...base.newsletter,
+      ...(patch.newsletter || {}),
+    },
+    footer: {
+      ...base.footer,
+      ...(patch.footer || {}),
+      supportLinks:
+        Array.isArray(patch.footer?.supportLinks) && patch.footer.supportLinks.length > 0
+          ? patch.footer.supportLinks
+          : base.footer.supportLinks,
+      atelierLinks:
+        Array.isArray(patch.footer?.atelierLinks) && patch.footer.atelierLinks.length > 0
+          ? patch.footer.atelierLinks
+          : base.footer.atelierLinks,
+    },
+  });
 }
 
 const STOREFRONT_CONFIG_META_ID = '__lunora_storefront_config__';
@@ -564,7 +595,7 @@ async function ensureSupabaseSeeded(supabase: SupabaseClient): Promise<boolean> 
     try {
       let [prodCheck, settingsCheck] = await Promise.all([
         supabase.from('products').select('id', { count: 'exact' }).limit(1),
-        supabase.from('store_settings').select('id, currency_symbol').limit(1),
+        supabase.from('store_settings').select('id, currency_symbol, support_email').limit(1),
       ]);
 
       const { url, key } = getCleanedSupabaseEnv();
@@ -582,7 +613,7 @@ async function ensureSupabaseSeeded(supabase: SupabaseClient): Promise<boolean> 
             await new Promise((r) => setTimeout(r, 1500));
             [prodCheck, settingsCheck] = await Promise.all([
               supabase.from('products').select('id', { count: 'exact' }).limit(1),
-              supabase.from('store_settings').select('id, currency_symbol').limit(1),
+              supabase.from('store_settings').select('id, currency_symbol, support_email').limit(1),
             ]);
             schemaError = prodCheck.error || settingsCheck.error;
           }
@@ -741,16 +772,15 @@ async function ensureSupabaseSeeded(supabase: SupabaseClient): Promise<boolean> 
             baseSettings.storefront_config = INITIAL_SETTINGS.storefrontConfig;
           }
           await supabase.from('store_settings').upsert(baseSettings);
-        } else if (settingsCheck.data[0]?.currency_symbol === '€') {
+        } else if (
+          settingsCheck.data[0]?.currency_symbol === '€' &&
+          settingsCheck.data[0]?.support_email === 'atelier@lunorafashion.pt'
+        ) {
           const patch: Record<string, unknown> = {
             currency_symbol: 'Kz',
             free_shipping_threshold: 50000,
             support_email: 'atelier@lunorafashion.ao',
-            integrations: [],
           };
-          if (hasStorefrontConfigCol) {
-            patch.storefront_config = DEFAULT_STOREFRONT_CONFIG;
-          }
           await supabase.from('store_settings').update(patch).eq('id', 1);
         }
       } catch (seedWarn) {
@@ -820,8 +850,14 @@ export async function getPublicStoreData(): Promise<{
             storefrontConfig: memoryStore.settings.storefrontConfig,
           };
 
-      if (rowStorefrontConfig) {
-        memoryStore.settings.storefrontConfig = rowStorefrontConfig;
+      if (settingsRow) {
+        const { integrations: cleanInt } = extractIntegrationsAndConfig(settingsRow.integrations);
+        memoryStore.settings = {
+          ...resolvedSettings,
+          integrations: Array.isArray(settingsRow.integrations)
+            ? cleanInt
+            : memoryStore.settings.integrations,
+        };
       }
 
       return {
@@ -882,8 +918,22 @@ export async function getAdminBundle() {
         itemsByOrder.set(orderId, list);
       });
 
+      const mappedProducts = (prodRes.data ?? []).map((r) =>
+        mapProductFromRow(r as Record<string, unknown>)
+      );
+      const mappedOrders = (ordRes.data ?? []).map((r) =>
+        mapOrderFromRow(r as Record<string, unknown>, itemsByOrder.get(String(r.id)))
+      );
+      const computedWeekly = computeCurrentWeekStats(mappedOrders, mappedProducts).map((d) => ({
+        day: d.day,
+        fullDay: d.fullDay,
+        apparel: d.apparel,
+        accessories: d.accessories,
+        deltaPercent: d.deltaPercent,
+      }));
+
       return {
-        products: (prodRes.data ?? []).map((r) => mapProductFromRow(r as Record<string, unknown>)),
+        products: mappedProducts,
         customers: (custRes.data ?? []).map((c) => ({
           id: String(c.id),
           name: String(c.name),
@@ -893,9 +943,7 @@ export async function getAdminBundle() {
           city: String(c.city),
           postalCode: String(c.postal_code),
         })),
-        orders: (ordRes.data ?? []).map((r) =>
-          mapOrderFromRow(r as Record<string, unknown>, itemsByOrder.get(String(r.id)))
-        ),
+        orders: mappedOrders,
         stockMovements: (movRes.data ?? []).map((m) => ({
           id: String(m.id),
           productId: String(m.product_id),
@@ -928,13 +976,15 @@ export async function getAdminBundle() {
           completedSteps: Number(c.completed_steps),
           totalSteps: Number(c.total_steps),
         })),
-        weeklySales: (salesRes.data ?? []).map((w) => ({
-          day: String(w.day),
-          fullDay: String(w.full_day),
-          apparel: Number(w.apparel),
-          accessories: Number(w.accessories),
-          deltaPercent: Number(w.delta_percent),
-        })),
+        weeklySales: computedWeekly.length
+          ? computedWeekly
+          : (salesRes.data ?? []).map((w) => ({
+              day: String(w.day),
+              fullDay: String(w.full_day),
+              apparel: Number(w.apparel),
+              accessories: Number(w.accessories),
+              deltaPercent: Number(w.delta_percent),
+            })),
         costs:
           hasStoreCostsTable && costRes.data
             ? (costRes.data as Record<string, unknown>[]).map((c) => ({
@@ -1539,6 +1589,110 @@ export async function updateOrderStatusInStore(orderId: string, status: OrderSta
   );
 }
 
+export async function deleteOrderInStore(orderId: string) {
+  const supabase = getSupabaseClient();
+  assertPersistenceAvailable(supabase);
+  if (supabase) {
+    await ensureSupabaseSeeded(supabase).catch(() => false);
+
+    const [{ data: existingOrder }, { data: orderItems }] = await Promise.all([
+      supabase
+        .from('orders')
+        .select('id, status, items, customer_id, customer_email')
+        .eq('id', orderId)
+        .maybeSingle(),
+      supabase.from('order_items').select('product_id, quantity').eq('order_id', orderId),
+    ]);
+
+    if (!existingOrder) {
+      throw new Error('Encomenda não encontrada.');
+    }
+
+    // Restore product stock when deleting an order that hasn't been delivered
+    if (String(existingOrder.status) !== 'Entregue') {
+      const qtyByProduct = new Map<string, number>();
+      if (Array.isArray(orderItems) && orderItems.length > 0) {
+        for (const item of orderItems) {
+          const pid = item.product_id ? String(item.product_id) : '';
+          const qty = Math.max(0, Number(item.quantity) || 0);
+          if (pid && qty > 0) {
+            qtyByProduct.set(pid, (qtyByProduct.get(pid) || 0) + qty);
+          }
+        }
+      } else if (Array.isArray(existingOrder.items)) {
+        for (const item of existingOrder.items as OrderItemSummary[]) {
+          const pid = item.productId ? String(item.productId) : '';
+          const qty = Math.max(0, Number(item.quantity) || 0);
+          if (pid && qty > 0) {
+            qtyByProduct.set(pid, (qtyByProduct.get(pid) || 0) + qty);
+          }
+        }
+      }
+
+      for (const [pid, restoreQty] of qtyByProduct.entries()) {
+        const { data: prod } = await supabase
+          .from('products')
+          .select('stock')
+          .eq('id', pid)
+          .maybeSingle();
+        if (prod) {
+          await supabase
+            .from('products')
+            .update({ stock: Math.max(0, Number(prod.stock || 0) + restoreQty) })
+            .eq('id', pid);
+        }
+      }
+    }
+
+    await supabase.from('stock_movements').delete().eq('order_id', orderId);
+    await supabase.from('order_items').delete().eq('order_id', orderId);
+    await supabase.from('tasks').delete().eq('order_id', orderId);
+    const { error } = await supabase.from('orders').delete().eq('id', orderId);
+    if (error) {
+      throw new Error(`Erro ao eliminar encomenda da base de dados (${error.message}).`);
+    }
+
+    const custId = existingOrder.customer_id ? String(existingOrder.customer_id) : '';
+    const custEmail = String(existingOrder.customer_email || '').toLowerCase();
+    if (custId && custEmail.endsWith('@registo.local')) {
+      const { count } = await supabase
+        .from('orders')
+        .select('id', { count: 'exact', head: true })
+        .eq('customer_id', custId);
+      if ((count ?? 0) === 0) {
+        await supabase.from('customers').delete().eq('id', custId);
+      }
+    }
+    return;
+  }
+
+  const target = memoryStore.orders.find((o) => o.id === orderId);
+  if (!target) {
+    throw new Error('Encomenda não encontrada.');
+  }
+  if (target.status !== 'Entregue') {
+    const restoreMap = new Map<string, number>();
+    for (const item of target.items) {
+      if (item.productId) {
+        restoreMap.set(item.productId, (restoreMap.get(item.productId) || 0) + item.quantity);
+      }
+    }
+    memoryStore.products = memoryStore.products.map((p) => {
+      const add = restoreMap.get(p.id) || 0;
+      return add > 0 ? { ...p, stock: p.stock + add } : p;
+    });
+  }
+  memoryStore.stockMovements = memoryStore.stockMovements.filter((m) => m.orderId !== orderId);
+  memoryStore.tasks = memoryStore.tasks.filter((t) => t.orderId !== orderId);
+  memoryStore.orders = memoryStore.orders.filter((o) => o.id !== orderId);
+  if (target.customerId && target.customerEmail.endsWith('@registo.local')) {
+    const hasOther = memoryStore.orders.some((o) => o.customerId === target.customerId);
+    if (!hasOther) {
+      memoryStore.customers = memoryStore.customers.filter((c) => c.id !== target.customerId);
+    }
+  }
+}
+
 export async function createProductInStore(
   product: Omit<Product, 'id' | 'rating' | 'reviewCount'>
 ): Promise<Product> {
@@ -1854,7 +2008,7 @@ export async function updateSettingsInStore(
 
     let nextStorefrontConfig: StorefrontConfig | null = null;
     if (updates.storefrontConfig !== undefined) {
-      const merged = mergeStorefrontConfig(updates.storefrontConfig);
+      const merged = mergeStorefrontConfigPatch(currentStorefrontConfig, updates.storefrontConfig);
       merged.heroSlides = await Promise.all(
         merged.heroSlides.map(async (s) => ({
           ...s,

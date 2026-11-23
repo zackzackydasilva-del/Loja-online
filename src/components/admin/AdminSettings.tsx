@@ -83,6 +83,7 @@ export const AdminSettings: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [savedNotice, setSavedNotice] = useState(false);
   const [saveError, setSaveError] = useState('');
+  const [hasUnsaved, setHasUnsaved] = useState(false);
   const hasUnsavedChangesRef = useRef(false);
 
   const [newChannelName, setNewChannelName] = useState('');
@@ -108,8 +109,35 @@ export const AdminSettings: React.FC = () => {
     setSf(mergeStorefrontConfig(settings.storefrontConfig));
   }, [settings]);
 
-  const updateSfDraft = (nextSf: StorefrontConfig) => {
+  const markDirty = () => {
     hasUnsavedChangesRef.current = true;
+    setHasUnsaved(true);
+    setSavedNotice(false);
+    setSaveError('');
+  };
+
+  const updateStoreNameField = (val: string) => {
+    markDirty();
+    setStoreName(val);
+  };
+
+  const updateCurrencyField = (val: string) => {
+    markDirty();
+    setCurrencySymbol(val);
+  };
+
+  const updateThresholdField = (val: string) => {
+    markDirty();
+    setThreshold(val);
+  };
+
+  const updateSupportEmailField = (val: string) => {
+    markDirty();
+    setSupportEmail(val);
+  };
+
+  const updateSfDraft = (nextSf: StorefrontConfig) => {
+    markDirty();
     setSf(nextSf);
   };
 
@@ -120,17 +148,19 @@ export const AdminSettings: React.FC = () => {
     setSavedNotice(false);
     try {
       await updateSettings({
-        storeName: storeName.trim() || 'Lunora Fashion',
-        currencySymbol: currencySymbol.trim() || 'Kz',
+        storeName: storeName.trim() || settings.storeName || 'Lunora Fashion',
+        currencySymbol: currencySymbol.trim() || settings.currencySymbol || 'Kz',
         freeShippingThreshold: Math.max(0, Number(threshold) || 0),
         supportEmail: supportEmail.trim(),
         storefrontConfig: nextSf,
       });
       hasUnsavedChangesRef.current = false;
+      setHasUnsaved(false);
       setSavedNotice(true);
-      setTimeout(() => setSavedNotice(false), 3000);
+      setTimeout(() => setSavedNotice(false), 3500);
     } catch (err) {
       hasUnsavedChangesRef.current = true;
+      setHasUnsaved(true);
       setSaveError(err instanceof Error ? err.message : 'Erro ao guardar alterações.');
     } finally {
       setSaving(false);
@@ -227,8 +257,11 @@ export const AdminSettings: React.FC = () => {
           {savedNotice && (
             <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
               <Check className="w-4 h-4" />
-              <span>Guardado na loja</span>
+              <span>Guardado na base de dados</span>
             </span>
+          )}
+          {!savedNotice && hasUnsaved && !saving && (
+            <span className="text-xs font-medium text-amber-700">Alterações por guardar</span>
           )}
           {saveError && <span className="text-xs text-red-700">{saveError}</span>}
           <button
@@ -262,7 +295,7 @@ export const AdminSettings: React.FC = () => {
                   <input
                     type="text"
                     value={storeName}
-                    onChange={(e) => setStoreName(e.target.value)}
+                    onChange={(e) => updateStoreNameField(e.target.value)}
                     className="w-full border border-black/15 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-[#1C1C1E]"
                   />
                 </div>
@@ -274,7 +307,7 @@ export const AdminSettings: React.FC = () => {
                   <input
                     type="text"
                     value={sf.headerWordmark}
-                    onChange={(e) => setSf({ ...sf, headerWordmark: e.target.value })}
+                    onChange={(e) => updateSfDraft({ ...sf, headerWordmark: e.target.value })}
                     className="w-full border border-black/15 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-[#1C1C1E]"
                   />
                 </div>
@@ -286,7 +319,7 @@ export const AdminSettings: React.FC = () => {
                   <input
                     type="text"
                     value={currencySymbol}
-                    onChange={(e) => setCurrencySymbol(e.target.value)}
+                    onChange={(e) => updateCurrencyField(e.target.value)}
                     placeholder="Kz"
                     className="w-full font-mono border border-black/15 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-[#1C1C1E]"
                   />
@@ -300,7 +333,7 @@ export const AdminSettings: React.FC = () => {
                     type="number"
                     min="0"
                     value={threshold}
-                    onChange={(e) => setThreshold(e.target.value)}
+                    onChange={(e) => updateThresholdField(e.target.value)}
                     className="w-full font-mono tabular-nums border border-black/15 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-[#1C1C1E]"
                   />
                 </div>
@@ -312,7 +345,7 @@ export const AdminSettings: React.FC = () => {
                   <input
                     type="email"
                     value={supportEmail}
-                    onChange={(e) => setSupportEmail(e.target.value)}
+                    onChange={(e) => updateSupportEmailField(e.target.value)}
                     className="w-full border border-black/15 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-[#1C1C1E]"
                   />
                 </div>
@@ -324,10 +357,46 @@ export const AdminSettings: React.FC = () => {
                   <input
                     type="text"
                     value={sf.adminGreeting}
-                    onChange={(e) => setSf({ ...sf, adminGreeting: e.target.value })}
+                    onChange={(e) => updateSfDraft({ ...sf, adminGreeting: e.target.value })}
                     className="w-full border border-black/15 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-[#1C1C1E]"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-[#555552] mb-1">
+                  Descrição da Loja (sobre a marca — visível no rodapé e faturas)
+                </label>
+                <textarea
+                  rows={2}
+                  value={sf.footer.tagline}
+                  onChange={(e) =>
+                    updateSfDraft({
+                      ...sf,
+                      footer: { ...sf.footer, tagline: e.target.value },
+                    })
+                  }
+                  placeholder="Descreva a sua loja e o seu estilo..."
+                  className="w-full border border-black/15 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-[#1C1C1E]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-[#555552] mb-1">
+                  Informação de Localização & Prazo de Entrega
+                </label>
+                <input
+                  type="text"
+                  value={sf.footer.locationText}
+                  onChange={(e) =>
+                    updateSfDraft({
+                      ...sf,
+                      footer: { ...sf.footer, locationText: e.target.value },
+                    })
+                  }
+                  placeholder="Ex: Luanda · Talatona · Entregas em 24–48h"
+                  className="w-full border border-black/15 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-[#1C1C1E]"
+                />
               </div>
 
               <div>
@@ -337,7 +406,7 @@ export const AdminSettings: React.FC = () => {
                 <input
                   type="text"
                   value={sf.topNoticeText || ''}
-                  onChange={(e) => setSf({ ...sf, topNoticeText: e.target.value })}
+                  onChange={(e) => updateSfDraft({ ...sf, topNoticeText: e.target.value })}
                   placeholder="Pagamento feito apenas na entrega · Pague apenas quando receber a sua encomenda"
                   className="w-full border border-black/15 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-[#1C1C1E]"
                 />
@@ -354,7 +423,7 @@ export const AdminSettings: React.FC = () => {
                       type="text"
                       value={sf.navLabels.collections}
                       onChange={(e) =>
-                        setSf({
+                        updateSfDraft({
                           ...sf,
                           navLabels: { ...sf.navLabels, collections: e.target.value },
                         })
@@ -368,7 +437,7 @@ export const AdminSettings: React.FC = () => {
                       type="text"
                       value={sf.navLabels.apparel}
                       onChange={(e) =>
-                        setSf({
+                        updateSfDraft({
                           ...sf,
                           navLabels: { ...sf.navLabels, apparel: e.target.value },
                         })
@@ -382,7 +451,7 @@ export const AdminSettings: React.FC = () => {
                       type="text"
                       value={sf.navLabels.accessories}
                       onChange={(e) =>
-                        setSf({
+                        updateSfDraft({
                           ...sf,
                           navLabels: { ...sf.navLabels, accessories: e.target.value },
                         })
@@ -396,7 +465,7 @@ export const AdminSettings: React.FC = () => {
                       type="text"
                       value={sf.navLabels.sale}
                       onChange={(e) =>
-                        setSf({
+                        updateSfDraft({
                           ...sf,
                           navLabels: { ...sf.navLabels, sale: e.target.value },
                         })
@@ -405,6 +474,23 @@ export const AdminSettings: React.FC = () => {
                     />
                   </div>
                 </div>
+              </div>
+
+              <div className="pt-3 border-t border-black/6 flex flex-wrap items-center justify-end gap-3">
+                {savedNotice && (
+                  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+                    <Check className="w-4 h-4" />
+                    <span>Informações guardadas permanentemente</span>
+                  </span>
+                )}
+                {saveError && <span className="text-xs text-red-700">{saveError}</span>}
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="px-5 py-2.5 bg-[#1C1C1E] text-white text-xs font-medium rounded-full hover:bg-[#323235] disabled:opacity-60 cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  {saving ? 'A guardar...' : 'Guardar Informações da Loja'}
+                </button>
               </div>
             </form>
 
@@ -817,7 +903,7 @@ export const AdminSettings: React.FC = () => {
                 <input
                   type="text"
                   value={sf.catalogTitle}
-                  onChange={(e) => setSf({ ...sf, catalogTitle: e.target.value })}
+                  onChange={(e) => updateSfDraft({ ...sf, catalogTitle: e.target.value })}
                   placeholder="Ex: Novos Artigos Populares"
                   className="w-full border border-black/15 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-[#1C1C1E]"
                 />
@@ -831,7 +917,7 @@ export const AdminSettings: React.FC = () => {
                   type="text"
                   value={sf.newsletter.promoCode}
                   onChange={(e) =>
-                    setSf({
+                    updateSfDraft({
                       ...sf,
                       newsletter: { ...sf.newsletter, promoCode: e.target.value.toUpperCase() },
                     })
@@ -861,7 +947,7 @@ export const AdminSettings: React.FC = () => {
                 rows={2}
                 value={sf.footer.tagline}
                 onChange={(e) =>
-                  setSf({ ...sf, footer: { ...sf.footer, tagline: e.target.value } })
+                  updateSfDraft({ ...sf, footer: { ...sf.footer, tagline: e.target.value } })
                 }
                 className="w-full border border-black/15 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#1C1C1E]"
               />
@@ -876,7 +962,10 @@ export const AdminSettings: React.FC = () => {
                   type="text"
                   value={sf.footer.newsletterTitle}
                   onChange={(e) =>
-                    setSf({ ...sf, footer: { ...sf.footer, newsletterTitle: e.target.value } })
+                    updateSfDraft({
+                      ...sf,
+                      footer: { ...sf.footer, newsletterTitle: e.target.value },
+                    })
                   }
                   className="w-full border border-black/15 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#1C1C1E]"
                 />
@@ -889,7 +978,7 @@ export const AdminSettings: React.FC = () => {
                   type="text"
                   value={sf.footer.newsletterDescription}
                   onChange={(e) =>
-                    setSf({
+                    updateSfDraft({
                       ...sf,
                       footer: { ...sf.footer, newsletterDescription: e.target.value },
                     })
@@ -908,7 +997,7 @@ export const AdminSettings: React.FC = () => {
                   type="text"
                   value={sf.footer.locationText}
                   onChange={(e) =>
-                    setSf({ ...sf, footer: { ...sf.footer, locationText: e.target.value } })
+                    updateSfDraft({ ...sf, footer: { ...sf.footer, locationText: e.target.value } })
                   }
                   className="w-full border border-black/15 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#1C1C1E]"
                 />
@@ -921,11 +1010,32 @@ export const AdminSettings: React.FC = () => {
                   type="text"
                   value={sf.footer.copyrightText}
                   onChange={(e) =>
-                    setSf({ ...sf, footer: { ...sf.footer, copyrightText: e.target.value } })
+                    updateSfDraft({
+                      ...sf,
+                      footer: { ...sf.footer, copyrightText: e.target.value },
+                    })
                   }
                   className="w-full border border-black/15 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#1C1C1E]"
                 />
               </div>
+            </div>
+
+            <div className="pt-3 border-t border-black/6 flex flex-wrap items-center justify-end gap-3">
+              {savedNotice && (
+                <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+                  <Check className="w-4 h-4" />
+                  <span>Guardado permanentemente na base de dados</span>
+                </span>
+              )}
+              {saveError && <span className="text-xs text-red-700">{saveError}</span>}
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => handleSaveAll()}
+                className="px-5 py-2.5 bg-[#1C1C1E] text-white text-xs font-medium rounded-full hover:bg-[#323235] disabled:opacity-60 cursor-pointer whitespace-nowrap shrink-0"
+              >
+                {saving ? 'A guardar...' : 'Guardar Catálogo & Rodapé'}
+              </button>
             </div>
           </div>
         </div>

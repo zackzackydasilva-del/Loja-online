@@ -99,6 +99,7 @@ interface StoreContextValue {
   placeOrder: (payload: CheckoutPayload) => Promise<StoreOrder>;
   createManualOrder: (payload: ManualOrderPayload) => Promise<StoreOrder>;
   updateOrderStatus: (orderId: string, status: OrderStatus) => Promise<void>;
+  deleteOrder: (orderId: string) => Promise<void>;
   addProduct: (product: Omit<Product, 'id' | 'rating' | 'reviewCount'>) => Promise<void>;
   updateProduct: (id: string, updates: Partial<Product>) => Promise<void>;
   deleteProduct: (id: string) => Promise<void>;
@@ -208,7 +209,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (settings.storeName) {
       document.title = `${settings.storeName} — Boutique Online & Gestão`;
     }
-  }, [settings.storeName]);
+    const tagline = settings.storefrontConfig?.footer?.tagline?.trim();
+    if (tagline) {
+      const metaDesc = document.querySelector('meta[name="description"]');
+      if (metaDesc) {
+        metaDesc.setAttribute('content', tagline);
+      }
+    }
+  }, [settings.storeName, settings.storefrontConfig?.footer?.tagline]);
 
   const fetchPublicStore = useCallback(async () => {
     try {
@@ -469,6 +477,18 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (adminToken) await fetchAdminBundle(adminToken);
   };
 
+  const deleteOrder = async (orderId: string) => {
+    await authFetch(`/api/admin/orders/${encodeURIComponent(orderId)}`, {
+      method: 'DELETE',
+    });
+    setOrders((prev) => prev.filter((o) => o.id !== orderId));
+    if (adminToken) {
+      await fetchAdminBundle(adminToken);
+    } else {
+      await fetchPublicStore();
+    }
+  };
+
   const addProduct = async (product: Omit<Product, 'id' | 'rating' | 'reviewCount'>) => {
     const res = await authFetch('/api/admin/products', {
       method: 'POST',
@@ -709,6 +729,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         placeOrder,
         createManualOrder,
         updateOrderStatus,
+        deleteOrder,
         addProduct,
         updateProduct,
         deleteProduct,

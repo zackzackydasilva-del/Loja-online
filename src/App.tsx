@@ -9,6 +9,7 @@ import { StorefrontBottomNav } from './components/storefront/StorefrontBottomNav
 import { ProductDetailModal } from './components/storefront/ProductDetailModal';
 import { CartDrawer } from './components/storefront/CartDrawer';
 import { ProfileNewsletterModal } from './components/storefront/ProfileNewsletterModal';
+import { WhatsAppSupportButton } from './components/storefront/WhatsAppSupportButton';
 import { AdminLayout, AdminTab } from './components/admin/AdminLayout';
 import { AdminDashboard } from './components/admin/AdminDashboard';
 import { AdminOrders } from './components/admin/AdminOrders';
@@ -181,6 +182,7 @@ const AppContent: React.FC = () => {
         isOpen={profileModalOpen}
         onClose={() => setProfileModalOpen(false)}
       />
+      <WhatsAppSupportButton />
     </div>
   );
 };

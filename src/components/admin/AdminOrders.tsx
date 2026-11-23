@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, Clock, FileText, Package, Plus } from 'lucide-react';
+import { CheckCircle2, Clock, FileText, Package, Plus, Trash2, X } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import { OrderStatus, StoreOrder } from '../../types/store';
 import { formatMoney } from '../../utils/currency';
@@ -22,10 +22,28 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
   onNewOrder,
   latestCreatedOrder,
 }) => {
-  const { orders, updateOrderStatus, settings } = useStore();
+  const { orders, updateOrderStatus, deleteOrder, settings } = useStore();
   const [statusFilter, setStatusFilter] = useState<'Todas' | 'Pendente' | 'Entregue'>('Todas');
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [invoiceOrderId, setInvoiceOrderId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState('');
+
+  const handleDeleteOrder = async (orderId: string) => {
+    setDeletingId(orderId);
+    setDeleteError('');
+    try {
+      await deleteOrder(orderId);
+      if (selectedOrderId === orderId) setSelectedOrderId(null);
+      if (invoiceOrderId === orderId) setInvoiceOrderId(null);
+      setConfirmDeleteId(null);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Erro ao eliminar encomenda.');
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   useEffect(() => {
     if (latestCreatedOrder) {
@@ -117,7 +135,7 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
                   <th className="py-3.5 px-4">Destino</th>
                   <th className="py-3.5 px-4">Estado / Pagamento</th>
                   <th className="py-3.5 px-4 text-right">Valor</th>
-                  <th className="py-3.5 px-5 text-right">Mudar Estado</th>
+                  <th className="py-3.5 px-5 text-right">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-black/5 text-[13px]">
@@ -212,31 +230,66 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
                         </td>
                         <td className="py-3.5 px-5 text-right">
                           <div
-                            className="inline-flex items-center rounded-full bg-[#F2F1EE] p-0.5 border border-black/8"
+                            className="inline-flex items-center justify-end gap-1.5"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            <button
-                              type="button"
-                              onClick={() => updateOrderStatus(order.id, 'Pendente')}
-                              className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors cursor-pointer ${
-                                !isPaid
-                                  ? 'bg-[#1C1C1E] text-white'
-                                  : 'text-[#555552] hover:text-[#1C1C1E]'
-                              }`}
-                            >
-                              Pendente
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => updateOrderStatus(order.id, 'Entregue')}
-                              className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors cursor-pointer ${
-                                isPaid
-                                  ? 'bg-emerald-700 text-white'
-                                  : 'text-[#555552] hover:text-[#1C1C1E]'
-                              }`}
-                            >
-                              Entregue
-                            </button>
+                            {confirmDeleteId === order.id ? (
+                              <div className="inline-flex items-center gap-1 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">
+                                <button
+                                  type="button"
+                                  disabled={deletingId === order.id}
+                                  onClick={() => handleDeleteOrder(order.id)}
+                                  className="px-2 py-0.5 rounded-full bg-red-600 text-white text-[11px] font-medium hover:bg-red-700 disabled:opacity-60 cursor-pointer"
+                                >
+                                  {deletingId === order.id ? 'A apagar...' : 'Confirmar'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteId(null)}
+                                  aria-label="Cancelar eliminação"
+                                  className="p-1 text-[#555552] hover:text-[#1C1C1E] cursor-pointer"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </div>
+                            ) : (
+                              <>
+                                <div className="inline-flex items-center rounded-full bg-[#F2F1EE] p-0.5 border border-black/8">
+                                  <button
+                                    type="button"
+                                    onClick={() => updateOrderStatus(order.id, 'Pendente')}
+                                    className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors cursor-pointer ${
+                                      !isPaid
+                                        ? 'bg-[#1C1C1E] text-white'
+                                        : 'text-[#555552] hover:text-[#1C1C1E]'
+                                    }`}
+                                  >
+                                    Pendente
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => updateOrderStatus(order.id, 'Entregue')}
+                                    className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors cursor-pointer ${
+                                      isPaid
+                                        ? 'bg-emerald-700 text-white'
+                                        : 'text-[#555552] hover:text-[#1C1C1E]'
+                                    }`}
+                                  >
+                                    Entregue
+                                  </button>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteId(order.id)}
+                                  title="Eliminar encomenda"
+                                  aria-label={`Eliminar encomenda ${order.id}`}
+                                  className="w-7 h-7 rounded-full flex items-center justify-center text-[#72726E] hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer shrink-0"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -352,8 +405,39 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
                   className="w-full py-2.5 px-4 rounded-xl bg-white/10 hover:bg-white/15 text-white text-xs font-medium inline-flex items-center justify-center gap-2 cursor-pointer transition-colors"
                 >
                   <FileText className="w-3.5 h-3.5" />
-                  <span>Abrir Factura Completa</span>
+                  <span>Abrir Factura (Imprimir / PDF)</span>
                 </button>
+
+                {deleteError && <p className="text-xs text-red-300">{deleteError}</p>}
+
+                {confirmDeleteId === selectedOrder.id ? (
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <button
+                      type="button"
+                      disabled={deletingId === selectedOrder.id}
+                      onClick={() => handleDeleteOrder(selectedOrder.id)}
+                      className="py-2 px-3 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-medium cursor-pointer disabled:opacity-60"
+                    >
+                      {deletingId === selectedOrder.id ? 'A eliminar...' : 'Confirmar Eliminação'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteId(null)}
+                      className="py-2 px-3 rounded-xl bg-[#28282B] hover:bg-[#323236] text-white/80 text-xs font-medium cursor-pointer"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDeleteId(selectedOrder.id)}
+                    className="w-full py-2 px-4 rounded-xl border border-red-400/30 text-red-300 hover:bg-red-500/15 text-xs font-medium inline-flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Eliminar Encomenda</span>
+                  </button>
+                )}
               </div>
             </>
           ) : (

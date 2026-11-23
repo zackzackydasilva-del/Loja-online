@@ -10,6 +10,7 @@ import {
   createOrderInStore,
   createProductInStore,
   deleteCostInStore,
+  deleteOrderInStore,
   deleteProductInStore,
   deleteTaskInStore,
   getAdminBundle,
@@ -402,6 +403,16 @@ app.patch('/api/admin/orders/:id/status', requireAdminAuth, async (req, res) => 
   res.json({ ok: true });
 });
 
+app.delete('/api/admin/orders/:id', requireAdminAuth, async (req, res) => {
+  try {
+    await deleteOrderInStore(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Erro ao eliminar encomenda.';
+    res.status(400).json({ error: message });
+  }
+});
+
 function isSafeAssetUrl(url: string): boolean {
   const trimmed = url.trim();
   if (!trimmed) return false;
@@ -640,10 +651,10 @@ app.patch('/api/admin/settings', requireAdminAuth, async (req, res) => {
     const body = req.body ?? {};
     const updates: Record<string, unknown> = {};
     if (typeof body.storeName === 'string' && body.storeName.trim()) {
-      updates.storeName = body.storeName.trim().slice(0, 80);
+      updates.storeName = body.storeName.trim().slice(0, 120);
     }
     if (typeof body.currencySymbol === 'string' && body.currencySymbol.trim()) {
-      updates.currencySymbol = body.currencySymbol.trim().slice(0, 10);
+      updates.currencySymbol = body.currencySymbol.trim().slice(0, 12);
     }
     if (
       body.freeShippingThreshold !== undefined &&
@@ -653,7 +664,7 @@ app.patch('/api/admin/settings', requireAdminAuth, async (req, res) => {
       updates.freeShippingThreshold = Number(body.freeShippingThreshold);
     }
     if (typeof body.supportEmail === 'string') {
-      updates.supportEmail = body.supportEmail.trim().slice(0, 120);
+      updates.supportEmail = body.supportEmail.trim().slice(0, 160);
     }
     if (Array.isArray(body.integrations)) {
       updates.integrations = body.integrations;

@@ -1,10 +1,14 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useStore } from '../../context/StoreContext';
 import { formatMoney } from '../../utils/currency';
+import { computeCurrentWeekStats } from '../../utils/weeklyAnalytics';
 import { FinancialSummaryPanel } from './FinancialSummaryPanel';
 
 export const AdminAnalytics: React.FC = () => {
-  const { orders, products, weeklySales, costs, settings } = useStore();
+  const { orders, products, costs, settings } = useStore();
+  const weeklyStats = useMemo(() => computeCurrentWeekStats(orders, products), [orders, products]);
+  const weeklyOrderCount = weeklyStats.reduce((s, d) => s + d.orderCount, 0);
+  const weeklyRevenueTotal = weeklyStats.reduce((s, d) => s + d.dailyRevenue, 0);
 
   const paidOrders = orders.filter((o) => o.status === 'Entregue');
   const totalRevenue = paidOrders.reduce((s, o) => s + o.total, 0);
@@ -90,25 +94,41 @@ export const AdminAnalytics: React.FC = () => {
         </div>
 
         <div className="lg:col-span-6 bg-white rounded-[24px] p-6 border border-black/5 space-y-4">
-          <h3 className="text-base font-semibold text-[#1C1C1E]">Faturação Diária da Semana</h3>
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-base font-semibold text-[#1C1C1E]">Faturação Diária da Semana</h3>
+            <span className="text-[11px] text-[#72726E] tabular-nums">
+              Seg – Dom · {weeklyOrderCount} encomenda(s)
+            </span>
+          </div>
           <div className="space-y-2.5">
-            {weeklySales.map((day) => {
-              const total = day.apparel + day.accessories;
-              return (
-                <div
-                  key={day.fullDay}
-                  className="flex items-center justify-between py-2 border-b border-black/5 last:border-b-0 text-xs"
-                >
-                  <span className="font-medium text-[#1C1C1E] w-24">{day.fullDay}</span>
-                  <span className="text-[#72726E] font-mono tabular-nums">
-                    {day.deltaPercent > 0 ? `+${day.deltaPercent}%` : `${day.deltaPercent}%`}
-                  </span>
-                  <span className="font-mono font-semibold tabular-nums text-[#1C1C1E] whitespace-nowrap">
-                    {formatMoney(total, settings.currencySymbol)}
+            {weeklyStats.map((day) => (
+              <div
+                key={day.dateIso}
+                className="flex items-center justify-between py-2 border-b border-black/5 last:border-b-0 text-xs gap-3"
+              >
+                <div className="w-32 shrink-0">
+                  <span className="font-medium text-[#1C1C1E]">{day.fullDay}</span>
+                  <span className="ml-1.5 text-[11px] text-[#8A8A85] font-mono tabular-nums">
+                    {day.shortDate}
                   </span>
                 </div>
-              );
-            })}
+                <span className="text-[#555552] font-mono tabular-nums">
+                  {day.orderCount} enc.
+                </span>
+                <span className="text-[#72726E] font-mono tabular-nums">
+                  {day.deltaPercent > 0 ? `+${day.deltaPercent}%` : `${day.deltaPercent}%`}
+                </span>
+                <span className="font-mono font-semibold tabular-nums text-[#1C1C1E] whitespace-nowrap">
+                  {formatMoney(day.dailyRevenue, settings.currencySymbol)}
+                </span>
+              </div>
+            ))}
+          </div>
+          <div className="pt-2 border-t border-black/8 flex items-center justify-between text-xs font-semibold text-[#1C1C1E]">
+            <span>Total da Semana ({weeklyOrderCount} encomendas)</span>
+            <span className="font-mono tabular-nums whitespace-nowrap">
+              {formatMoney(weeklyRevenueTotal, settings.currencySymbol)}
+            </span>
           </div>
         </div>
       </div>

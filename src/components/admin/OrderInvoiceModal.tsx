@@ -1,8 +1,10 @@
 import React from 'react';
-import { CheckCircle2, Clock, Printer, X } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { CheckCircle2, Clock, Download, Printer, X } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import { OrderStatus, StoreOrder } from '../../types/store';
 import { formatMoney } from '../../utils/currency';
+import { downloadOrderInvoicePdf } from '../../utils/invoicePdf';
 
 interface OrderInvoiceModalProps {
   order: StoreOrder | null;
@@ -51,12 +53,23 @@ export const OrderInvoiceModal: React.FC<OrderInvoiceModalProps> = ({
       ? order.postalCode
       : matchedCustomer?.postalCode || '—';
 
-  return (
+  const handleDownloadPdf = () => {
+    downloadOrderInvoicePdf({
+      order,
+      settings,
+      products,
+      customers,
+    });
+  };
+
+  const modalNode = (
     <div
+      id="printable-invoice-overlay"
       className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 print:p-0 print:bg-white"
       onClick={onClose}
     >
       <div
+        id="printable-invoice-sheet"
         onClick={(e) => e.stopPropagation()}
         className="w-full max-w-2xl bg-white rounded-[24px] shadow-2xl border border-black/10 max-h-[92vh] overflow-y-auto print:shadow-none print:border-none print:max-h-none print:rounded-none"
       >
@@ -103,6 +116,15 @@ export const OrderInvoiceModal: React.FC<OrderInvoiceModalProps> = ({
                 {isPaid ? 'Mudar para Pendente' : 'Marcar Entregue (Pago)'}
               </button>
             )}
+
+            <button
+              type="button"
+              onClick={handleDownloadPdf}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#1C1C1E] text-white text-xs font-medium hover:bg-[#323235] cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Guardar PDF</span>
+            </button>
 
             <button
               type="button"
@@ -301,4 +323,6 @@ export const OrderInvoiceModal: React.FC<OrderInvoiceModalProps> = ({
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalNode, document.body) : modalNode;
 };
