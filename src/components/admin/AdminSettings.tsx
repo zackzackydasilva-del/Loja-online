@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Check,
   LayoutTemplate,
@@ -83,6 +83,7 @@ export const AdminSettings: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [savedNotice, setSavedNotice] = useState(false);
   const [saveError, setSaveError] = useState('');
+  const hasUnsavedChangesRef = useRef(false);
 
   const [newChannelName, setNewChannelName] = useState('');
   const [newChannelRole, setNewChannelRole] = useState('');
@@ -99,6 +100,7 @@ export const AdminSettings: React.FC = () => {
   const [savingPassword, setSavingPassword] = useState(false);
 
   useEffect(() => {
+    if (hasUnsavedChangesRef.current) return;
     setStoreName(settings.storeName);
     setCurrencySymbol(settings.currencySymbol || 'Kz');
     setThreshold(String(settings.freeShippingThreshold));
@@ -106,8 +108,13 @@ export const AdminSettings: React.FC = () => {
     setSf(mergeStorefrontConfig(settings.storefrontConfig));
   }, [settings]);
 
-  const handleSaveAll = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  const updateSfDraft = (nextSf: StorefrontConfig) => {
+    hasUnsavedChangesRef.current = true;
+    setSf(nextSf);
+  };
+
+  const persistStorefrontDraft = async (nextSf: StorefrontConfig) => {
+    setSf(nextSf);
     setSaving(true);
     setSaveError('');
     setSavedNotice(false);
@@ -117,15 +124,22 @@ export const AdminSettings: React.FC = () => {
         currencySymbol: currencySymbol.trim() || 'Kz',
         freeShippingThreshold: Math.max(0, Number(threshold) || 0),
         supportEmail: supportEmail.trim(),
-        storefrontConfig: sf,
+        storefrontConfig: nextSf,
       });
+      hasUnsavedChangesRef.current = false;
       setSavedNotice(true);
       setTimeout(() => setSavedNotice(false), 3000);
     } catch (err) {
+      hasUnsavedChangesRef.current = true;
       setSaveError(err instanceof Error ? err.message : 'Erro ao guardar alterações.');
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSaveAll = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    await persistStorefrontDraft(sf);
   };
 
   const handleAddChannel = async (e: React.FormEvent) => {
@@ -610,7 +624,7 @@ export const AdminSettings: React.FC = () => {
               <input
                 type="text"
                 value={sf.heroTitle}
-                onChange={(e) => setSf({ ...sf, heroTitle: e.target.value })}
+                onChange={(e) => updateSfDraft({ ...sf, heroTitle: e.target.value })}
                 placeholder="Ex: Essenciais da Estação"
                 className="w-full border border-black/15 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:border-[#1C1C1E]"
               />
@@ -623,7 +637,7 @@ export const AdminSettings: React.FC = () => {
               <textarea
                 rows={3}
                 value={sf.heroSubtitle}
-                onChange={(e) => setSf({ ...sf, heroSubtitle: e.target.value })}
+                onChange={(e) => updateSfDraft({ ...sf, heroSubtitle: e.target.value })}
                 className="w-full border border-black/15 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:border-[#1C1C1E]"
               />
             </div>
@@ -635,7 +649,7 @@ export const AdminSettings: React.FC = () => {
               <input
                 type="text"
                 value={sf.heroPrimaryCta}
-                onChange={(e) => setSf({ ...sf, heroPrimaryCta: e.target.value })}
+                onChange={(e) => updateSfDraft({ ...sf, heroPrimaryCta: e.target.value })}
                 placeholder="Ex: Explorar Coleção"
                 className="w-full border border-black/15 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:border-[#1C1C1E]"
               />
@@ -658,7 +672,7 @@ export const AdminSettings: React.FC = () => {
                 type="button"
                 onClick={() => {
                   const nextNum = String(sf.heroSlides.length + 1).padStart(2, '0');
-                  setSf({
+                  updateSfDraft({
                     ...sf,
                     heroSlides: [
                       ...sf.heroSlides,
@@ -691,7 +705,7 @@ export const AdminSettings: React.FC = () => {
                           onClick={() => {
                             const next = [...sf.heroSlides];
                             next[idx] = { ...next[idx], image: '' };
-                            setSf({ ...sf, heroSlides: next });
+                            persistStorefrontDraft({ ...sf, heroSlides: next });
                           }}
                           className="inline-flex items-center gap-1 text-[11px] text-[#555552] hover:text-[#1C1C1E] hover:underline cursor-pointer"
                         >
@@ -708,7 +722,7 @@ export const AdminSettings: React.FC = () => {
                                 ...item,
                                 index: String(i + 1).padStart(2, '0'),
                               }));
-                            setSf({ ...sf, heroSlides: filtered });
+                            persistStorefrontDraft({ ...sf, heroSlides: filtered });
                           }}
                           className="inline-flex items-center gap-1 text-[11px] text-red-700 hover:underline cursor-pointer"
                         >
@@ -729,7 +743,7 @@ export const AdminSettings: React.FC = () => {
                       onChange={(e) => {
                         const next = [...sf.heroSlides];
                         next[idx] = { ...next[idx], caption: e.target.value };
-                        setSf({ ...sf, heroSlides: next });
+                        updateSfDraft({ ...sf, heroSlides: next });
                       }}
                       className="w-full bg-white border border-black/15 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#1C1C1E]"
                     />
@@ -740,14 +754,43 @@ export const AdminSettings: React.FC = () => {
                     recommendedSize="900 × 1050 px (vertical 4:5 · mín. 700 × 820 px)"
                     value={slide.image}
                     allowEmpty
+                    uploadFolder="banners"
                     onChange={(url) => {
                       const next = [...sf.heroSlides];
                       next[idx] = { ...next[idx], image: url };
-                      setSf({ ...sf, heroSlides: next });
+                      const nextSf = { ...sf, heroSlides: next };
+                      const shouldAutoSave =
+                        url === '' ||
+                        url.startsWith('data:image/') ||
+                        url.includes('/storage/v1/object/public/') ||
+                        url.startsWith('/src/assets/images/');
+                      if (shouldAutoSave) {
+                        persistStorefrontDraft(nextSf);
+                      } else {
+                        updateSfDraft(nextSf);
+                      }
                     }}
                   />
                 </div>
               ))}
+            </div>
+
+            <div className="pt-2 flex flex-wrap items-center justify-end gap-3 border-t border-black/6">
+              {savedNotice && (
+                <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+                  <Check className="w-4 h-4" />
+                  <span>Banner guardado permanentemente</span>
+                </span>
+              )}
+              {saveError && <span className="text-xs text-red-700">{saveError}</span>}
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => handleSaveAll()}
+                className="px-5 py-2.5 bg-[#1C1C1E] text-white text-xs font-medium rounded-full hover:bg-[#323235] disabled:opacity-60 cursor-pointer whitespace-nowrap shrink-0"
+              >
+                {saving ? 'A guardar...' : 'Guardar Banner'}
+              </button>
             </div>
           </div>
         </div>

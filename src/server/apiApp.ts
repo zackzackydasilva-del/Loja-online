@@ -23,6 +23,7 @@ import {
   updateProductInStore,
   updateSettingsInStore,
   updateTaskInStore,
+  uploadImageAssetInStore,
 } from './storeRepository.ts';
 import type { OrderStatus, ProductColorVariant, StoreCostCategory } from '../types/store.ts';
 
@@ -617,6 +618,23 @@ app.delete('/api/admin/costs/:id', requireAdminAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
+app.post('/api/admin/upload-image', requireAdminAuth, async (req, res) => {
+  try {
+    const body = req.body ?? {};
+    const dataUrl = typeof body.dataUrl === 'string' ? body.dataUrl.trim() : '';
+    const folder = body.folder === 'products' ? 'products' : 'banners';
+    if (!dataUrl || !isSafeAssetUrl(dataUrl)) {
+      res.status(400).json({ error: 'Imagem inválida para carregamento.' });
+      return;
+    }
+    const result = await uploadImageAssetInStore(dataUrl, folder);
+    res.json({ ok: true, url: result.url, storedInBucket: result.storedInBucket });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Erro ao carregar imagem.';
+    res.status(400).json({ error: message });
+  }
+});
+
 app.patch('/api/admin/settings', requireAdminAuth, async (req, res) => {
   try {
     const body = req.body ?? {};
@@ -682,8 +700,8 @@ app.patch('/api/admin/settings', requireAdminAuth, async (req, res) => {
       updates.storefrontConfig = cfg;
     }
 
-    await updateSettingsInStore(updates);
-    res.json({ ok: true });
+    const savedSettings = await updateSettingsInStore(updates);
+    res.json({ ok: true, settings: savedSettings });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Erro ao guardar definições.';
     res.status(400).json({ error: message });

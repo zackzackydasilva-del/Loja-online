@@ -2,6 +2,7 @@ import React, { useId, useState } from 'react';
 import { ImagePlus, Link as LinkIcon } from 'lucide-react';
 import { ASSETS } from '../../data/seedData';
 import { compressImageFileToDataUrl } from '../../utils/imageUpload';
+import { useStore } from '../../context/StoreContext';
 import { SafeImage } from '../SafeImage';
 
 export const STUDIO_IMAGE_PRESETS = [
@@ -24,6 +25,7 @@ interface ImageFieldProps {
   onChange: (nextUrl: string) => void;
   allowEmpty?: boolean;
   compact?: boolean;
+  uploadFolder?: 'products' | 'banners';
 }
 
 export const ImageField: React.FC<ImageFieldProps> = ({
@@ -33,8 +35,10 @@ export const ImageField: React.FC<ImageFieldProps> = ({
   onChange,
   allowEmpty = false,
   compact = false,
+  uploadFolder = 'products',
 }) => {
   const fileInputId = useId();
+  const { adminToken } = useStore();
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
 
@@ -47,7 +51,28 @@ export const ImageField: React.FC<ImageFieldProps> = ({
     setUploading(true);
     try {
       const dataUrl = await compressImageFileToDataUrl(file);
-      onChange(dataUrl);
+      let finalUrl = dataUrl;
+      if (adminToken) {
+        try {
+          const uploadRes = await fetch('/api/admin/upload-image', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${adminToken}`,
+            },
+            body: JSON.stringify({ dataUrl, folder: uploadFolder }),
+          });
+          if (uploadRes.ok) {
+            const uploaded = await uploadRes.json().catch(() => null);
+            if (uploaded?.url && typeof uploaded.url === 'string') {
+              finalUrl = uploaded.url;
+            }
+          }
+        } catch {
+          // Fallback cleanly to compressed dataUrl if direct upload fails
+        }
+      }
+      onChange(finalUrl);
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : 'Erro ao carregar imagem.');
     } finally {

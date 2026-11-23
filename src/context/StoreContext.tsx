@@ -596,10 +596,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const updateSettings = async (updates: Partial<StoreSettings>) => {
-    await authFetch('/api/admin/settings', {
+    const res = await authFetch('/api/admin/settings', {
       method: 'PATCH',
       body: JSON.stringify(updates),
     });
+    const data = await res.json().catch(() => ({}));
+    if (data?.settings) {
+      setSettings((prev) => ({ ...prev, ...data.settings }));
+    }
     await fetchPublicStore();
     if (adminToken) await fetchAdminBundle(adminToken);
   };

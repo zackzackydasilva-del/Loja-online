@@ -116,6 +116,76 @@ function mergeStorefrontConfig(raw: unknown): StorefrontConfig {
   };
 }
 
+const STOREFRONT_CONFIG_META_ID = '__lunora_storefront_config__';
+
+function isMissingStorefrontColError(err: { code?: string; message?: string } | null | undefined): boolean {
+  if (!err) return false;
+  return (
+    err.code === '42703' ||
+    err.code === 'PGRST204' ||
+    String(err.message || '').toLowerCase().includes('storefront_config')
+  );
+}
+
+function extractIntegrationsAndConfig(rawIntegrations: unknown): {
+  integrations: StoreSettings['integrations'];
+  embeddedConfig: Partial<StorefrontConfig> | null;
+} {
+  if (!Array.isArray(rawIntegrations)) {
+    return { integrations: [], embeddedConfig: null };
+  }
+  const integrations: StoreSettings['integrations'] = [];
+  let embeddedConfig: Partial<StorefrontConfig> | null = null;
+  for (const item of rawIntegrations) {
+    if (item && typeof item === 'object') {
+      const rec = item as Record<string, unknown>;
+      if (rec.id === STOREFRONT_CONFIG_META_ID) {
+        if (rec.config && typeof rec.config === 'object') {
+          embeddedConfig = rec.config as Partial<StorefrontConfig>;
+        }
+        continue;
+      }
+      integrations.push(item as StoreSettings['integrations'][number]);
+    }
+  }
+  return { integrations, embeddedConfig };
+}
+
+function packIntegrationsWithConfig(
+  visibleIntegrations: StoreSettings['integrations'],
+  config: StorefrontConfig | null
+): unknown[] {
+  const clean = visibleIntegrations.filter((i) => i && i.id !== STOREFRONT_CONFIG_META_ID);
+  if (!config) return clean;
+  return [
+    ...clean,
+    {
+      id: STOREFRONT_CONFIG_META_ID,
+      name: 'storefront_config',
+      role: 'system',
+      connected: false,
+      config,
+    },
+  ];
+}
+
+function resolveStorefrontFromRow(row: Record<string, unknown> | null): StorefrontConfig | null {
+  if (!row) return null;
+  if (
+    'storefront_config' in row &&
+    row.storefront_config &&
+    typeof row.storefront_config === 'object' &&
+    Object.keys(row.storefront_config as Record<string, unknown>).length > 0
+  ) {
+    return mergeStorefrontConfig(row.storefront_config);
+  }
+  const { embeddedConfig } = extractIntegrationsAndConfig(row.integrations);
+  if (embeddedConfig && Object.keys(embeddedConfig).length > 0) {
+    return mergeStorefrontConfig(embeddedConfig);
+  }
+  return null;
+}
+
 interface MemoryStore {
   products: Product[];
   customers: StoreCustomer[];
@@ -255,8 +325,8 @@ let mediaBucketReady = false;
 async function ensureMediaBucket(supabase: SupabaseClient): Promise<boolean> {
   if (mediaBucketReady) return true;
   try {
-    const { data: buckets } = await supabase.storage.listBuckets();
-    if (buckets?.some((b) => b.name === MEDIA_BUCKET)) {
+    const { data: buckets, error: listErr } = await supabase.storage.listBuckets();
+    if (!listErr && buckets?.some((b) => b.name === MEDIA_BUCKET)) {
       mediaBucketReady = true;
       return true;
     }
@@ -270,7 +340,7 @@ async function ensureMediaBucket(supabase: SupabaseClient): Promise<boolean> {
       return true;
     }
   } catch {
-    // Fallback gracefully to inline base64
+    // Proceed to direct upload attempt even if bucket listing/creation is restricted
   }
   return false;
 }
@@ -287,10 +357,9 @@ async function persistImageAsset(
   const match = trimmed.match(/^data:(image\/[a-z0-9.+-]+);base64,([\s\S]+)$/i);
   if (!match) return trimmed;
   try {
-    const ready = await ensureMediaBucket(supabase);
-    if (!ready) return trimmed;
+    await ensureMediaBucket(supabase);
     const mime = match[1].toLowerCase();
-    const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg';
+    const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : mime.includes('gif') ? 'gif' : 'jpg';
     const base64Body = match[2].replace(/\s+/g, '');
     const buffer = Buffer.from(base64Body, 'base64');
     if (buffer.length === 0) return trimmed;
@@ -302,12 +371,33 @@ async function persistImageAsset(
       upsert: true,
       cacheControl: '31536000',
     });
-    if (error) return trimmed;
+    if (error) {
+      console.warn('Supabase Storage upload warning:', folder, error.message);
+      return trimmed;
+    }
+    mediaBucketReady = true;
     const { data } = supabase.storage.from(MEDIA_BUCKET).getPublicUrl(filePath);
     return data?.publicUrl || trimmed;
-  } catch {
+  } catch (err) {
+    console.warn('Supabase Storage upload exception:', err instanceof Error ? err.message : err);
     return trimmed;
   }
+}
+
+export async function uploadImageAssetInStore(
+  value: string,
+  folder: 'products' | 'banners' = 'banners'
+): Promise<{ url: string; storedInBucket: boolean }> {
+  const trimmed = value.trim();
+  const supabase = getSupabaseClient();
+  if (!supabase || !trimmed.startsWith('data:image/')) {
+    return { url: trimmed, storedInBucket: trimmed.startsWith('http') };
+  }
+  const uploadedUrl = await persistImageAsset(supabase, trimmed, folder);
+  return {
+    url: uploadedUrl,
+    storedInBucket: uploadedUrl.startsWith('http://') || uploadedUrl.startsWith('https://'),
+  };
 }
 
 export function isSupabaseConfigured(): boolean {
@@ -514,7 +604,11 @@ async function ensureSupabaseSeeded(supabase: SupabaseClient): Promise<boolean> 
       // Check or migrate optional storefront_config column & store_costs table without blocking core tables
       let cfgProbe = await supabase.from('store_settings').select('storefront_config').limit(1);
       if (cfgProbe.error) {
-        if (projectRef) {
+        const isMissingCol =
+          cfgProbe.error.code === '42703' ||
+          cfgProbe.error.code === 'PGRST204' ||
+          cfgProbe.error.message.toLowerCase().includes('storefront_config');
+        if (isMissingCol && projectRef) {
           const altered = await executeSupabaseSql(
             projectRef,
             "ALTER TABLE public.store_settings ADD COLUMN IF NOT EXISTS storefront_config jsonb NOT NULL DEFAULT '{}'::jsonb; ALTER TABLE public.store_settings ALTER COLUMN free_shipping_threshold TYPE numeric(12, 2);"
@@ -527,7 +621,7 @@ async function ensureSupabaseSeeded(supabase: SupabaseClient): Promise<boolean> 
             }
           }
         }
-        hasStorefrontConfigCol = !cfgProbe.error;
+        hasStorefrontConfigCol = cfgProbe.error ? !isMissingCol : true;
       } else {
         hasStorefrontConfigCol = true;
       }
@@ -691,43 +785,48 @@ export async function getPublicStoreData(): Promise<{
   if (supabase) {
     await ensureSupabaseSeeded(supabase).catch(() => false);
     const settingsCols = hasStorefrontConfigCol
-      ? 'store_name, currency_symbol, free_shipping_threshold, support_email, storefront_config'
-      : 'store_name, currency_symbol, free_shipping_threshold, support_email';
+      ? 'store_name, currency_symbol, free_shipping_threshold, support_email, integrations, storefront_config'
+      : 'store_name, currency_symbol, free_shipping_threshold, support_email, integrations';
     let [prodRes, setRes] = await Promise.all([
       supabase.from('products').select('*').order('created_at', { ascending: false }),
       supabase.from('store_settings').select(settingsCols).eq('id', 1).maybeSingle(),
     ]);
 
-    if (setRes.error && hasStorefrontConfigCol) {
+    if (setRes.error && hasStorefrontConfigCol && isMissingStorefrontColError(setRes.error)) {
+      hasStorefrontConfigCol = false;
       setRes = await supabase
         .from('store_settings')
-        .select('store_name, currency_symbol, free_shipping_threshold, support_email')
+        .select('store_name, currency_symbol, free_shipping_threshold, support_email, integrations')
         .eq('id', 1)
         .maybeSingle();
     }
 
     if (!prodRes.error && prodRes.data) {
       const settingsRow = setRes.data as Record<string, unknown> | null;
+      const rowStorefrontConfig = resolveStorefrontFromRow(settingsRow);
+      const resolvedSettings = settingsRow
+        ? {
+            storeName: String(settingsRow.store_name),
+            currencySymbol: String(settingsRow.currency_symbol),
+            freeShippingThreshold: Number(settingsRow.free_shipping_threshold),
+            supportEmail: String(settingsRow.support_email),
+            storefrontConfig: rowStorefrontConfig || memoryStore.settings.storefrontConfig,
+          }
+        : {
+            storeName: memoryStore.settings.storeName,
+            currencySymbol: memoryStore.settings.currencySymbol,
+            freeShippingThreshold: memoryStore.settings.freeShippingThreshold,
+            supportEmail: memoryStore.settings.supportEmail,
+            storefrontConfig: memoryStore.settings.storefrontConfig,
+          };
+
+      if (rowStorefrontConfig) {
+        memoryStore.settings.storefrontConfig = rowStorefrontConfig;
+      }
+
       return {
         products: prodRes.data.map((r) => mapProductFromRow(r as Record<string, unknown>)),
-        settings: settingsRow
-          ? {
-              storeName: String(settingsRow.store_name),
-              currencySymbol: String(settingsRow.currency_symbol),
-              freeShippingThreshold: Number(settingsRow.free_shipping_threshold),
-              supportEmail: String(settingsRow.support_email),
-              storefrontConfig:
-                'storefront_config' in settingsRow && settingsRow.storefront_config
-                  ? mergeStorefrontConfig(settingsRow.storefront_config)
-                  : memoryStore.settings.storefrontConfig,
-            }
-          : {
-              storeName: memoryStore.settings.storeName,
-              currencySymbol: memoryStore.settings.currencySymbol,
-              freeShippingThreshold: memoryStore.settings.freeShippingThreshold,
-              supportEmail: memoryStore.settings.supportEmail,
-              storefrontConfig: memoryStore.settings.storefrontConfig,
-            },
+        settings: resolvedSettings,
         persistence: 'supabase',
       };
     }
@@ -847,18 +946,21 @@ export async function getAdminBundle() {
               }))
             : memoryStore.costs,
         settings: setRes.data
-          ? {
-              storeName: String(setRes.data.store_name),
-              currencySymbol: String(setRes.data.currency_symbol),
-              freeShippingThreshold: Number(setRes.data.free_shipping_threshold),
-              supportEmail: String(setRes.data.support_email),
-              integrations: Array.isArray(setRes.data.integrations)
-                ? (setRes.data.integrations as StoreSettings['integrations'])
-                : memoryStore.settings.integrations,
-              storefrontConfig: hasStorefrontConfigCol
-                ? mergeStorefrontConfig(setRes.data.storefront_config)
-                : memoryStore.settings.storefrontConfig,
-            }
+          ? (() => {
+              const row = setRes.data as Record<string, unknown>;
+              const { integrations: cleanIntegrations } = extractIntegrationsAndConfig(row.integrations);
+              const resolvedSf = resolveStorefrontFromRow(row) || memoryStore.settings.storefrontConfig;
+              return {
+                storeName: String(row.store_name),
+                currencySymbol: String(row.currency_symbol),
+                freeShippingThreshold: Number(row.free_shipping_threshold),
+                supportEmail: String(row.support_email),
+                integrations: Array.isArray(row.integrations)
+                  ? cleanIntegrations
+                  : memoryStore.settings.integrations,
+                storefrontConfig: resolvedSf,
+              };
+            })()
           : memoryStore.settings,
         newsletterEmails: (newsRes.data ?? []).map((n) => String(n.email)),
         persistence: 'supabase' as const,
@@ -1721,7 +1823,9 @@ export async function deleteTaskInStore(id: string) {
   memoryStore.tasks = memoryStore.tasks.filter((t) => t.id !== id);
 }
 
-export async function updateSettingsInStore(updates: Partial<StoreSettings>) {
+export async function updateSettingsInStore(
+  updates: Partial<StoreSettings>
+): Promise<StoreSettings> {
   if (updates.storefrontConfig !== undefined) {
     memoryStore.settings.storefrontConfig = mergeStorefrontConfig(updates.storefrontConfig);
   }
@@ -1729,15 +1833,27 @@ export async function updateSettingsInStore(updates: Partial<StoreSettings>) {
   assertPersistenceAvailable(supabase);
   if (supabase) {
     await ensureSupabaseSeeded(supabase).catch(() => false);
-    const rowUpdates: Record<string, unknown> = {};
-    if (updates.storeName !== undefined) rowUpdates.store_name = updates.storeName;
-    if (updates.currencySymbol !== undefined) rowUpdates.currency_symbol = updates.currencySymbol;
-    if (updates.freeShippingThreshold !== undefined) {
-      rowUpdates.free_shipping_threshold = updates.freeShippingThreshold;
-    }
-    if (updates.supportEmail !== undefined) rowUpdates.support_email = updates.supportEmail;
-    if (updates.integrations !== undefined) rowUpdates.integrations = updates.integrations;
-    if (updates.storefrontConfig !== undefined && hasStorefrontConfigCol) {
+
+    // Read current settings row so updates to integrations and storefrontConfig never overwrite each other
+    const { data: currentRowData } = await supabase
+      .from('store_settings')
+      .select('*')
+      .eq('id', 1)
+      .maybeSingle();
+    const currentRow = currentRowData as Record<string, unknown> | null;
+    const { integrations: currentIntegrations } = extractIntegrationsAndConfig(
+      currentRow?.integrations
+    );
+    const currentStorefrontConfig =
+      resolveStorefrontFromRow(currentRow) || memoryStore.settings.storefrontConfig;
+
+    const nextIntegrations =
+      updates.integrations !== undefined
+        ? updates.integrations.filter((i) => i && i.id !== STOREFRONT_CONFIG_META_ID)
+        : currentIntegrations;
+
+    let nextStorefrontConfig: StorefrontConfig | null = null;
+    if (updates.storefrontConfig !== undefined) {
       const merged = mergeStorefrontConfig(updates.storefrontConfig);
       merged.heroSlides = await Promise.all(
         merged.heroSlides.map(async (s) => ({
@@ -1770,17 +1886,75 @@ export async function updateSettingsInStore(updates: Partial<StoreSettings>) {
           'banners'
         );
       }
-      rowUpdates.storefront_config = merged;
+      memoryStore.settings.storefrontConfig = merged;
+      nextStorefrontConfig = merged;
     }
+
+    const rowUpdates: Record<string, unknown> = {};
+    if (updates.storeName !== undefined) rowUpdates.store_name = updates.storeName;
+    if (updates.currencySymbol !== undefined) rowUpdates.currency_symbol = updates.currencySymbol;
+    if (updates.freeShippingThreshold !== undefined) {
+      rowUpdates.free_shipping_threshold = updates.freeShippingThreshold;
+    }
+    if (updates.supportEmail !== undefined) rowUpdates.support_email = updates.supportEmail;
+
+    if (hasStorefrontConfigCol) {
+      if (updates.integrations !== undefined) {
+        rowUpdates.integrations = nextIntegrations;
+      }
+      if (nextStorefrontConfig) {
+        rowUpdates.storefront_config = nextStorefrontConfig;
+      }
+    } else {
+      const configToEmbed = nextStorefrontConfig || currentStorefrontConfig;
+      if (updates.integrations !== undefined || nextStorefrontConfig) {
+        rowUpdates.integrations = packIntegrationsWithConfig(nextIntegrations, configToEmbed);
+      }
+    }
+
+    const mapRowToSettings = (savedRow: Record<string, unknown>): StoreSettings => {
+      const { integrations: cleanInt } = extractIntegrationsAndConfig(savedRow.integrations);
+      const resolvedSf =
+        resolveStorefrontFromRow(savedRow) ||
+        nextStorefrontConfig ||
+        memoryStore.settings.storefrontConfig;
+      const mapped: StoreSettings = {
+        storeName: String(savedRow.store_name),
+        currencySymbol: String(savedRow.currency_symbol),
+        freeShippingThreshold: Number(savedRow.free_shipping_threshold),
+        supportEmail: String(savedRow.support_email),
+        integrations: cleanInt,
+        storefrontConfig: resolvedSf,
+      };
+      memoryStore.settings = mapped;
+      return mapped;
+    };
+
     if (Object.keys(rowUpdates).length > 0) {
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from('store_settings')
         .update(rowUpdates)
         .eq('id', 1)
-        .select('id');
+        .select('*');
+
+      if (error && isMissingStorefrontColError(error)) {
+        hasStorefrontConfigCol = false;
+        delete rowUpdates.storefront_config;
+        const configToEmbed = nextStorefrontConfig || currentStorefrontConfig;
+        rowUpdates.integrations = packIntegrationsWithConfig(nextIntegrations, configToEmbed);
+        const retry = await supabase
+          .from('store_settings')
+          .update(rowUpdates)
+          .eq('id', 1)
+          .select('*');
+        data = retry.data;
+        error = retry.error;
+      }
+
       if (error) {
         throw new Error(`Não foi possível guardar as definições no Supabase (${error.message}).`);
       }
+
       if (!data || data.length === 0) {
         const upsertPayload: Record<string, unknown> = {
           id: 1,
@@ -1789,18 +1963,25 @@ export async function updateSettingsInStore(updates: Partial<StoreSettings>) {
           free_shipping_threshold:
             updates.freeShippingThreshold ?? INITIAL_SETTINGS.freeShippingThreshold,
           support_email: updates.supportEmail ?? INITIAL_SETTINGS.supportEmail,
-          integrations: updates.integrations ?? INITIAL_SETTINGS.integrations,
+          integrations: rowUpdates.integrations ?? nextIntegrations,
           ...rowUpdates,
         };
-        const { error: upsertErr } = await supabase
+        const { data: upserted, error: upsertErr } = await supabase
           .from('store_settings')
-          .upsert(upsertPayload, { onConflict: 'id' });
+          .upsert(upsertPayload, { onConflict: 'id' })
+          .select('*');
         if (upsertErr) {
           throw new Error(`Não foi possível guardar as definições no Supabase (${upsertErr.message}).`);
         }
+        const savedRow = upserted?.[0] as Record<string, unknown> | undefined;
+        if (savedRow) {
+          return mapRowToSettings(savedRow);
+        }
+      } else {
+        return mapRowToSettings(data[0] as Record<string, unknown>);
       }
     }
-    return;
+    return memoryStore.settings;
   }
   memoryStore.settings = {
     ...memoryStore.settings,
@@ -1809,6 +1990,7 @@ export async function updateSettingsInStore(updates: Partial<StoreSettings>) {
       ? mergeStorefrontConfig(updates.storefrontConfig)
       : memoryStore.settings.storefrontConfig,
   };
+  return memoryStore.settings;
 }
 
 export async function subscribeNewsletterInStore(email: string) {
