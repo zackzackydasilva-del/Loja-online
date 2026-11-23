@@ -20,10 +20,67 @@ import {
   INITIAL_SETTINGS,
   WEEKLY_SALES_DATA,
 } from '../data/seedData';
+import { getVisitorSessionId } from '../utils/storeTracker';
 
 const CART_STORAGE_KEY = 'lunora_cart_v2';
 const WISHLIST_STORAGE_KEY = 'lunora_wishlist_v2';
 const ADMIN_TOKEN_STORAGE_KEY = 'lunora_admin_token_v1';
+const PUBLIC_STORE_CACHE_KEY = 'lunora_public_store_cache_v1';
+
+interface PublicStoreCacheSnapshot {
+  products: Product[];
+  settings?: Partial<StoreSettings>;
+  savedAt: number;
+}
+
+function readCachedPublicStore(): PublicStoreCacheSnapshot | null {
+  try {
+    const raw = localStorage.getItem(PUBLIC_STORE_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PublicStoreCacheSnapshot;
+    if (parsed && Array.isArray(parsed.products)) {
+      return parsed;
+    }
+  } catch {
+    // Ignore cache read error
+  }
+  return null;
+}
+
+function writeCachedPublicStore(products: Product[], settings: Partial<StoreSettings>) {
+  try {
+    const snapshot: PublicStoreCacheSnapshot = {
+      products,
+      settings,
+      savedAt: Date.now(),
+    };
+    localStorage.setItem(PUBLIC_STORE_CACHE_KEY, JSON.stringify(snapshot));
+  } catch {
+    // Quota fallback: store essential product fields without oversized inline base64 strings
+    try {
+      const compactProducts = products.map((p) => ({
+        ...p,
+        image: p.image.startsWith('data:') ? '' : p.image,
+        colorVariants: undefined,
+      }));
+      localStorage.setItem(
+        PUBLIC_STORE_CACHE_KEY,
+        JSON.stringify({ products: compactProducts, savedAt: Date.now() })
+      );
+    } catch {
+      // Ignore storage error completely
+    }
+  }
+}
+
+declare global {
+  interface Window {
+    __LUNORA_PREFETCH__?: Promise<{
+      products?: Product[];
+      settings?: Partial<StoreSettings>;
+    } | null>;
+  }
+}
 
 interface CheckoutPayload {
   customerName: string;
@@ -68,6 +125,7 @@ interface StoreContextValue {
   weeklySales: WeeklySalesPoint[];
   costs: StoreCost[];
   settings: StoreSettings;
+  isStoreLoaded: boolean;
   cart: CartItem[];
   wishlist: string[];
   newsletterEmails: string[];
@@ -128,7 +186,9 @@ interface StoreContextValue {
 const StoreContext = createContext<StoreContextValue | null>(null);
 
 export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [products, setProducts] = useState<Product[]>([]);
+  const [initialCache] = useState<PublicStoreCacheSnapshot | null>(() => readCachedPublicStore());
+  const [products, setProducts] = useState<Product[]>(() => initialCache?.products ?? []);
+  const [isStoreLoaded, setIsStoreLoaded] = useState<boolean>(() => Boolean(initialCache));
   const [customers, setCustomers] = useState<StoreCustomer[]>([]);
   const [orders, setOrders] = useState<StoreOrder[]>([]);
   const [stockMovements, setStockMovements] = useState<StockMovement[]>([]);
@@ -137,7 +197,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [campaigns, setCampaigns] = useState<StoreCampaign[]>([]);
   const [weeklySales, setWeeklySales] = useState<WeeklySalesPoint[]>(WEEKLY_SALES_DATA);
   const [costs, setCosts] = useState<StoreCost[]>([]);
-  const [settings, setSettings] = useState<StoreSettings>(INITIAL_SETTINGS);
+  const [settings, setSettings] = useState<StoreSettings>(() =>
+    initialCache?.settings ? { ...INITIAL_SETTINGS, ...initialCache.settings } : INITIAL_SETTINGS
+  );
   const [newsletterEmails, setNewsletterEmails] = useState<string[]>([]);
 
   const [cart, setCart] = useState<CartItem[]>(() => {
@@ -218,19 +280,32 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [settings.storeName, settings.storefrontConfig?.footer?.tagline]);
 
-  const fetchPublicStore = useCallback(async () => {
+  const fetchPublicStore = useCallback(async (usePrefetch = false) => {
     try {
-      const res = await fetch('/api/store', { cache: 'no-store' });
-      if (!res.ok) return;
-      const data = await res.json();
-      if (Array.isArray(data.products)) {
-        setProducts(data.products);
+      let data: { products?: Product[]; settings?: Partial<StoreSettings> } | null = null;
+      if (usePrefetch && window.__LUNORA_PREFETCH__) {
+        const prefetched = await window.__LUNORA_PREFETCH__;
+        window.__LUNORA_PREFETCH__ = undefined;
+        if (prefetched) {
+          data = prefetched;
+        }
       }
-      if (data.settings) {
+      if (!data) {
+        const res = await fetch('/api/store', { cache: 'no-store' });
+        if (!res.ok) return;
+        data = await res.json();
+      }
+      if (data && Array.isArray(data.products)) {
+        setProducts(data.products);
+        writeCachedPublicStore(data.products, data.settings || {});
+      }
+      if (data?.settings) {
         setSettings((prev) => ({ ...prev, ...data.settings }));
       }
     } catch {
       // Keep current fallback if offline
+    } finally {
+      setIsStoreLoaded(true);
     }
   }, []);
 
@@ -262,11 +337,11 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
     if (activeAppView !== 'storefront') return;
 
-    fetchPublicStore();
+    fetchPublicStore(true);
 
     const syncIfVisible = () => {
       if (document.visibilityState === 'visible') {
-        fetchPublicStore();
+        fetchPublicStore(false);
       }
     };
 
@@ -442,6 +517,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       body: JSON.stringify({
         ...payload,
         items: cart,
+        sessionId: getVisitorSessionId(),
       }),
     });
     const data = await res.json();
@@ -701,6 +777,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         weeklySales,
         costs,
         settings,
+        isStoreLoaded,
         cart,
         wishlist,
         newsletterEmails,

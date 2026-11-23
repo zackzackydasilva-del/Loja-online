@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { StoreProvider, useStore } from './context/StoreContext';
 import { Product, ProductCategory, StoreOrder } from './types/store';
 import { StorefrontHeader } from './components/storefront/StorefrontHeader';
 import { StorefrontHero } from './components/storefront/StorefrontHero';
 import { ProductGrid } from './components/storefront/ProductGrid';
+import { StorefrontBottomBanner } from './components/storefront/StorefrontBottomBanner';
 import { StorefrontFooter } from './components/storefront/StorefrontFooter';
 import { StorefrontBottomNav } from './components/storefront/StorefrontBottomNav';
 import { ProductDetailModal } from './components/storefront/ProductDetailModal';
@@ -20,9 +21,29 @@ import { AdminSettings } from './components/admin/AdminSettings';
 import { ProductFormModal } from './components/admin/ProductFormModal';
 import { ManualOrderModal } from './components/admin/ManualOrderModal';
 import { AdminAuthGate } from './components/admin/AdminAuthGate';
+import {
+  reportVisitorStage,
+  startStoreVisitorTracker,
+  stopStoreVisitorTracker,
+} from './utils/storeTracker';
+
+const LazyAdminRealtimeAnalytics = lazy(() =>
+  import('./components/admin/AdminRealtimeAnalytics').then((m) => ({
+    default: m.AdminRealtimeAnalytics,
+  }))
+);
 
 const AppContent: React.FC = () => {
-  const { activeAppView, setSelectedCategory, setSearchQuery, adminToken } = useStore();
+  const {
+    activeAppView,
+    setSelectedCategory,
+    setSearchQuery,
+    adminToken,
+    cart,
+    products,
+    isCartOpen,
+    quickViewProduct,
+  } = useStore();
   const [adminTab, setAdminTab] = useState<AdminTab>('dashboard');
   const [adminSearch, setAdminSearch] = useState('');
   const [productModalOpen, setProductModalOpen] = useState(false);
@@ -33,6 +54,45 @@ const AppContent: React.FC = () => {
   const [storeSearchOpen, setStoreSearchOpen] = useState(false);
   const [wishlistOnly, setWishlistOnly] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
+
+  // Non-blocking immediate real-time visitor tracking on storefront mount
+  useEffect(() => {
+    if (activeAppView !== 'storefront') {
+      stopStoreVisitorTracker();
+      return;
+    }
+
+    let cancelled = false;
+    const rafId = window.requestAnimationFrame(() => {
+      if (cancelled) return;
+      const cartCount = cart.reduce((s, i) => s + i.quantity, 0);
+      const priceMap = new Map(products.map((p) => [p.id, p.price]));
+      const cartTotal = cart.reduce((s, i) => s + (priceMap.get(i.productId) || 0) * i.quantity, 0);
+      startStoreVisitorTracker({
+        stage: 'loja',
+        cartCount,
+        cartTotal,
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(rafId);
+    };
+  }, [activeAppView]);
+
+  // Keep visitor browsing stage synced when closing product modal / bag drawer
+  useEffect(() => {
+    if (activeAppView !== 'storefront' || isCartOpen || quickViewProduct) return;
+    const cartCount = cart.reduce((s, i) => s + i.quantity, 0);
+    const priceMap = new Map(products.map((p) => [p.id, p.price]));
+    const cartTotal = cart.reduce((s, i) => s + (priceMap.get(i.productId) || 0) * i.quantity, 0);
+    reportVisitorStage({
+      stage: 'loja',
+      cartCount,
+      cartTotal,
+    });
+  }, [activeAppView, isCartOpen, quickViewProduct, cart, products]);
 
   const navigateStoreSection = (sectionId: string, category?: ProductCategory | 'Todos') => {
     setWishlistOnly(false);
@@ -95,6 +155,17 @@ const AppContent: React.FC = () => {
             />
           )}
           {adminTab === 'analytics' && <AdminAnalytics />}
+          {adminTab === 'realtime' && (
+            <Suspense
+              fallback={
+                <div className="bg-white rounded-[24px] p-10 text-center text-xs text-[#72726E] border border-black/5">
+                  A carregar analítico em tempo real...
+                </div>
+              }
+            >
+              <LazyAdminRealtimeAnalytics />
+            </Suspense>
+          )}
           {adminTab === 'customers' && <AdminCustomers searchFilter={adminSearch} />}
           {adminTab === 'settings' && <AdminSettings />}
         </AdminLayout>
@@ -127,6 +198,15 @@ const AppContent: React.FC = () => {
         searchOpen={storeSearchOpen}
         onToggleSearch={() => setStoreSearchOpen((v) => !v)}
         onOpenProfile={() => setProfileModalOpen(true)}
+        wishlistOnly={wishlistOnly}
+        onToggleWishlist={() => {
+          setStoreSearchOpen(false);
+          setWishlistOnly((v) => !v);
+          requestAnimationFrame(() => {
+            const el = document.getElementById('catalog');
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          });
+        }}
       />
 
       <main className="flex-1">
@@ -135,6 +215,7 @@ const AppContent: React.FC = () => {
           wishlistOnly={wishlistOnly}
           onResetView={() => setWishlistOnly(false)}
         />
+        <StorefrontBottomBanner onShopNow={(cat) => navigateStoreSection('catalog', cat)} />
       </main>
 
       <StorefrontFooter onNavigateCategory={(cat) => navigateStoreSection('catalog', cat)} />

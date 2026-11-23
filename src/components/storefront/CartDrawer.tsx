@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ArrowLeft, CheckCircle2, Minus, Plus, ShoppingBag, Trash2, X } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import { PaymentMethod, StoreOrder } from '../../types/store';
 import { formatMoney } from '../../utils/currency';
+import { reportVisitorStage } from '../../utils/storeTracker';
 import { SafeImage } from '../SafeImage';
 
 export const CartDrawer: React.FC = () => {
@@ -37,8 +38,6 @@ export const CartDrawer: React.FC = () => {
   const [checkoutError, setCheckoutError] = useState('');
   const [submittingOrder, setSubmittingOrder] = useState(false);
 
-  if (!isCartOpen) return null;
-
   const activePromoCode = (settings.storefrontConfig.newsletter.promoCode || 'LUNORA10').trim().toUpperCase();
 
   const cartLines = cart
@@ -55,6 +54,57 @@ export const CartDrawer: React.FC = () => {
       ? Math.min(100, (subtotal / settings.freeShippingThreshold) * 100)
       : 100;
   const remainingForFreeShipping = Math.max(0, settings.freeShippingThreshold - subtotal);
+  const cartTotalUnits = cartLines.reduce((s, i) => s + i.quantity, 0);
+  const cartItemsSummary = cartLines.map((i) => `${i.quantity}x ${i.product.name}`);
+
+  useEffect(() => {
+    if (!isCartOpen) return;
+    if (step === 'confirmed' && confirmedOrder) {
+      reportVisitorStage({
+        stage: 'comprou',
+        cartCount: confirmedOrder.items.reduce((s, i) => s + i.quantity, 0),
+        cartTotal: confirmedOrder.total,
+        cartItemsSummary: confirmedOrder.items.map((i) => `${i.quantity}x ${i.name}`),
+        customerName: confirmedOrder.customerName,
+        customerEmail: confirmedOrder.customerEmail,
+        city: confirmedOrder.city,
+        completedOrderId: confirmedOrder.id,
+        eventId: `evt-order-${confirmedOrder.id}`,
+      });
+      return;
+    }
+
+    if (step === 'checkout') {
+      reportVisitorStage({
+        stage: 'checkout',
+        cartCount: cartTotalUnits,
+        cartTotal: total,
+        cartItemsSummary,
+        customerName: form.customerName,
+        customerEmail: form.customerEmail,
+        city: form.city,
+      });
+      return;
+    }
+
+    reportVisitorStage({
+      stage: 'saco',
+      cartCount: cartTotalUnits,
+      cartTotal: total,
+      cartItemsSummary,
+    });
+  }, [
+    isCartOpen,
+    step,
+    cartTotalUnits,
+    total,
+    form.customerName,
+    form.customerEmail,
+    form.city,
+    confirmedOrder,
+  ]);
+
+  if (!isCartOpen) return null;
 
   const handleApplyPromo = (e: React.FormEvent) => {
     e.preventDefault();

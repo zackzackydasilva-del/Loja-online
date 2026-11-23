@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
+  Activity,
   BarChart3,
   Bell,
   Briefcase,
@@ -22,7 +23,14 @@ import { ASSETS } from '../../data/seedData';
 import { useStore } from '../../context/StoreContext';
 import { SafeImage } from '../SafeImage';
 
-export type AdminTab = 'dashboard' | 'orders' | 'products' | 'analytics' | 'customers' | 'settings';
+export type AdminTab =
+  | 'dashboard'
+  | 'orders'
+  | 'products'
+  | 'analytics'
+  | 'realtime'
+  | 'customers'
+  | 'settings';
 
 interface AdminLayoutProps {
   activeTab: AdminTab;
@@ -38,6 +46,7 @@ const NAV_ITEMS: { id: AdminTab; label: string; icon: React.ComponentType<{ clas
   { id: 'orders', label: 'Encomendas', icon: ShoppingBag },
   { id: 'products', label: 'Catálogo', icon: Package },
   { id: 'analytics', label: 'Estatísticas', icon: BarChart3 },
+  { id: 'realtime', label: 'Analítico', icon: Activity },
   { id: 'customers', label: 'Clientes', icon: Users },
 ];
 
@@ -82,6 +91,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
     orders: 'Gestão de Encomendas',
     products: 'Catálogo & Inventário',
     analytics: 'Estatísticas da Loja',
+    realtime: 'Analítico em Tempo Real',
     customers: 'Diretório de Clientes',
     settings: 'Definições da Loja',
   };
@@ -270,11 +280,11 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
   );
 
   return (
-    <div className="min-h-screen bg-[#DFDFDC] p-2 sm:p-5 lg:p-7 text-[#1C1C1E]">
+    <div className="min-h-screen bg-[#DFDFDC] p-2 sm:p-5 lg:p-7 2xl:p-8 text-[#1C1C1E]">
       {/* Translucent Frosted Frame Matching Reference 1 */}
-      <div className="max-w-[1440px] mx-auto rounded-[30px] bg-[#ECECE9]/92 border border-white/70 shadow-[0_24px_60px_-18px_rgba(0,0,0,0.14)] p-3 sm:p-5 lg:p-6 flex gap-6 min-h-[calc(100vh-3.5rem)]">
+      <div className="max-w-[1600px] mx-auto rounded-[30px] bg-[#ECECE9]/92 border border-white/70 shadow-[0_24px_60px_-18px_rgba(0,0,0,0.14)] p-3 sm:p-5 lg:p-6 flex gap-6 min-h-[calc(100vh-3.5rem)]">
         {/* Desktop Floating Sidebar */}
-        <aside className="hidden lg:block w-[236px] shrink-0 bg-white rounded-[26px] p-5 shadow-[0_6px_24px_-8px_rgba(0,0,0,0.06)]">
+        <aside className="hidden lg:block w-[252px] shrink-0 bg-white rounded-[26px] p-5 shadow-[0_6px_24px_-8px_rgba(0,0,0,0.06)]">
           {SidebarContent}
         </aside>
 

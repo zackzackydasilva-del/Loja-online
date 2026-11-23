@@ -7,6 +7,7 @@ import {
   getLastBootstrapDiagnostic,
 } from './supabaseBootstrap.ts';
 import type {
+  LiveVisitorSession,
   OrderItemSummary,
   OrderStatus,
   PaymentMethod,
@@ -14,6 +15,7 @@ import type {
   ProductCategory,
   ProductColorVariant,
   StockMovement,
+  StoreAnalyticsEvent,
   StoreCampaign,
   StoreCost,
   StoreCostCategory,
@@ -23,6 +25,7 @@ import type {
   StoreOrder,
   StoreSettings,
   StoreTask,
+  VisitorStage,
   WeeklySalesPoint,
 } from '../types/store.ts';
 import {
@@ -94,6 +97,14 @@ function mergeStorefrontConfig(raw: unknown): StorefrontConfig {
       Array.isArray(obj.promoBanners) && obj.promoBanners.length > 0
         ? obj.promoBanners
         : DEFAULT_STOREFRONT_CONFIG.promoBanners,
+    bottomBanner: {
+      ...DEFAULT_STOREFRONT_CONFIG.bottomBanner!,
+      ...(obj.bottomBanner || {}),
+      slides:
+        Array.isArray(obj.bottomBanner?.slides) && obj.bottomBanner.slides.length > 0
+          ? obj.bottomBanner.slides
+          : DEFAULT_STOREFRONT_CONFIG.bottomBanner!.slides,
+    },
     guarantees:
       Array.isArray(obj.guarantees) && obj.guarantees.length > 0
         ? obj.guarantees
@@ -121,6 +132,7 @@ function mergeStorefrontConfigPatch(
   base: StorefrontConfig,
   patch: Partial<StorefrontConfig>
 ): StorefrontConfig {
+  const baseBottom = base.bottomBanner || DEFAULT_STOREFRONT_CONFIG.bottomBanner!;
   return mergeStorefrontConfig({
     ...base,
     ...patch,
@@ -128,6 +140,16 @@ function mergeStorefrontConfigPatch(
       ...base.navLabels,
       ...(patch.navLabels || {}),
     },
+    bottomBanner: patch.bottomBanner
+      ? {
+          ...baseBottom,
+          ...patch.bottomBanner,
+          slides:
+            Array.isArray(patch.bottomBanner.slides) && patch.bottomBanner.slides.length > 0
+              ? patch.bottomBanner.slides
+              : baseBottom.slides,
+        }
+      : baseBottom,
     newsletter: {
       ...base.newsletter,
       ...(patch.newsletter || {}),
@@ -230,6 +252,8 @@ interface MemoryStore {
   settings: StoreSettings;
   newsletterEmails: string[];
   adminPasswordHash: string | null;
+  livePresence: LiveVisitorSession[];
+  analyticsEvents: StoreAnalyticsEvent[];
 }
 
 const memoryStore: MemoryStore = {
@@ -245,10 +269,30 @@ const memoryStore: MemoryStore = {
   settings: structuredClone(INITIAL_SETTINGS),
   newsletterEmails: [],
   adminPasswordHash: null,
+  livePresence: [],
+  analyticsEvents: [],
 };
 
 let cachedClient: SupabaseClient | null = null;
 let seededChecked = false;
+let hasAnalyticsTables = true;
+
+interface PublicStorePayload {
+  products: Product[];
+  settings: Pick<
+    StoreSettings,
+    'storeName' | 'currencySymbol' | 'freeShippingThreshold' | 'supportEmail' | 'storefrontConfig'
+  >;
+  persistence: 'supabase' | 'memory';
+}
+
+const PUBLIC_STORE_CACHE_TTL_MS = 15_000;
+let publicStoreCache: { data: PublicStorePayload; cachedAt: number } | null = null;
+let publicStoreInFlight: Promise<PublicStorePayload> | null = null;
+
+export function invalidatePublicStoreCache() {
+  publicStoreCache = null;
+}
 
 function resolveSupabaseUrl(rawUrl: string | undefined, key: string | undefined): string | null {
   const cleanUrl = (rawUrl || '').trim().replace(/^[\s"'`<>]+|[\s"'`<>]+$/g, '');
@@ -677,6 +721,66 @@ async function ensureSupabaseSeeded(supabase: SupabaseClient): Promise<boolean> 
         hasStoreCostsTable = true;
       }
 
+      let analyticsProbe = await supabase.from('store_analytics_events').select('id').limit(1);
+      if (analyticsProbe.error) {
+        if (projectRef) {
+          const createdAnalytics = await executeSupabaseSql(
+            projectRef,
+            `
+            create table if not exists public.store_presence (
+              session_id text primary key,
+              visitor_label text not null,
+              stage text not null default 'loja',
+              product_id text,
+              product_name text,
+              cart_count integer not null default 0,
+              cart_total numeric(12, 2) not null default 0,
+              cart_items_summary jsonb not null default '[]'::jsonb,
+              customer_name text,
+              customer_email text,
+              city text,
+              device text not null default 'Web',
+              started_at timestamptz not null default now(),
+              last_seen_at timestamptz not null default now(),
+              completed_order_id text
+            );
+            create table if not exists public.store_analytics_events (
+              id text primary key,
+              session_id text not null,
+              visitor_label text not null,
+              event_type text not null,
+              product_id text,
+              product_name text,
+              order_id text,
+              customer_name text,
+              customer_email text,
+              city text,
+              cart_count integer not null default 0,
+              cart_total numeric(12, 2) not null default 0,
+              details text,
+              device text,
+              created_at timestamptz not null default now()
+            );
+            create index if not exists idx_store_presence_last_seen on public.store_presence(last_seen_at desc);
+            create index if not exists idx_store_analytics_events_created on public.store_analytics_events(created_at desc);
+            create index if not exists idx_store_analytics_events_type on public.store_analytics_events(event_type);
+            alter table public.store_presence disable row level security;
+            alter table public.store_analytics_events disable row level security;
+            `.trim()
+          );
+          if (createdAnalytics) {
+            for (let attempt = 0; attempt < 3; attempt++) {
+              await new Promise((r) => setTimeout(r, 800));
+              analyticsProbe = await supabase.from('store_analytics_events').select('id').limit(1);
+              if (!analyticsProbe.error) break;
+            }
+          }
+        }
+        hasAnalyticsTables = !analyticsProbe.error;
+      } else {
+        hasAnalyticsTables = true;
+      }
+
       if (
         projectRef &&
         (process.env.SUPABASE_DB_PASSWORD ||
@@ -700,6 +804,8 @@ async function ensureSupabaseSeeded(supabase: SupabaseClient): Promise<boolean> 
           ALTER TABLE IF EXISTS public.store_settings DISABLE ROW LEVEL SECURITY;
           ALTER TABLE IF EXISTS public.newsletter_subscribers DISABLE ROW LEVEL SECURITY;
           ALTER TABLE IF EXISTS public.store_costs DISABLE ROW LEVEL SECURITY;
+          ALTER TABLE IF EXISTS public.store_presence DISABLE ROW LEVEL SECURITY;
+          ALTER TABLE IF EXISTS public.store_analytics_events DISABLE ROW LEVEL SECURITY;
           GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
           GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
           `.trim()
@@ -803,82 +909,103 @@ async function ensureSupabaseSeeded(supabase: SupabaseClient): Promise<boolean> 
   return inFlightSeedPromise;
 }
 
-export async function getPublicStoreData(): Promise<{
-  products: Product[];
-  settings: Pick<
-    StoreSettings,
-    'storeName' | 'currencySymbol' | 'freeShippingThreshold' | 'supportEmail' | 'storefrontConfig'
-  >;
-  persistence: 'supabase' | 'memory';
-}> {
-  const supabase = getSupabaseClient();
-  if (supabase) {
-    await ensureSupabaseSeeded(supabase).catch(() => false);
-    const settingsCols = hasStorefrontConfigCol
-      ? 'store_name, currency_symbol, free_shipping_threshold, support_email, integrations, storefront_config'
-      : 'store_name, currency_symbol, free_shipping_threshold, support_email, integrations';
-    let [prodRes, setRes] = await Promise.all([
-      supabase.from('products').select('*').order('created_at', { ascending: false }),
-      supabase.from('store_settings').select(settingsCols).eq('id', 1).maybeSingle(),
-    ]);
+export function getWarmPublicStoreSnapshot(): PublicStorePayload | null {
+  return publicStoreCache?.data ?? null;
+}
 
-    if (setRes.error && hasStorefrontConfigCol && isMissingStorefrontColError(setRes.error)) {
-      hasStorefrontConfigCol = false;
-      setRes = await supabase
-        .from('store_settings')
-        .select('store_name, currency_symbol, free_shipping_threshold, support_email, integrations')
-        .eq('id', 1)
-        .maybeSingle();
-    }
-
-    if (!prodRes.error && prodRes.data) {
-      const settingsRow = setRes.data as Record<string, unknown> | null;
-      const rowStorefrontConfig = resolveStorefrontFromRow(settingsRow);
-      const resolvedSettings = settingsRow
-        ? {
-            storeName: String(settingsRow.store_name),
-            currencySymbol: String(settingsRow.currency_symbol),
-            freeShippingThreshold: Number(settingsRow.free_shipping_threshold),
-            supportEmail: String(settingsRow.support_email),
-            storefrontConfig: rowStorefrontConfig || memoryStore.settings.storefrontConfig,
-          }
-        : {
-            storeName: memoryStore.settings.storeName,
-            currencySymbol: memoryStore.settings.currencySymbol,
-            freeShippingThreshold: memoryStore.settings.freeShippingThreshold,
-            supportEmail: memoryStore.settings.supportEmail,
-            storefrontConfig: memoryStore.settings.storefrontConfig,
-          };
-
-      if (settingsRow) {
-        const { integrations: cleanInt } = extractIntegrationsAndConfig(settingsRow.integrations);
-        memoryStore.settings = {
-          ...resolvedSettings,
-          integrations: Array.isArray(settingsRow.integrations)
-            ? cleanInt
-            : memoryStore.settings.integrations,
-        };
-      }
-
-      return {
-        products: prodRes.data.map((r) => mapProductFromRow(r as Record<string, unknown>)),
-        settings: resolvedSettings,
-        persistence: 'supabase',
-      };
-    }
+export async function getPublicStoreData(forceFresh = false): Promise<PublicStorePayload> {
+  if (
+    !forceFresh &&
+    publicStoreCache &&
+    Date.now() - publicStoreCache.cachedAt < PUBLIC_STORE_CACHE_TTL_MS
+  ) {
+    return publicStoreCache.data;
   }
 
-  return {
-    products: memoryStore.products,
-    settings: {
-      storeName: memoryStore.settings.storeName,
-      currencySymbol: memoryStore.settings.currencySymbol,
-      freeShippingThreshold: memoryStore.settings.freeShippingThreshold,
-      supportEmail: memoryStore.settings.supportEmail,
-      storefrontConfig: memoryStore.settings.storefrontConfig,
-    },
-    persistence: 'memory',
-  };
+  if (!forceFresh && publicStoreInFlight) {
+    return publicStoreInFlight;
+  }
+
+  publicStoreInFlight = (async (): Promise<PublicStorePayload> => {
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      await ensureSupabaseSeeded(supabase).catch(() => false);
+      const settingsCols = hasStorefrontConfigCol
+        ? 'store_name, currency_symbol, free_shipping_threshold, support_email, integrations, storefront_config'
+        : 'store_name, currency_symbol, free_shipping_threshold, support_email, integrations';
+      let [prodRes, setRes] = await Promise.all([
+        supabase.from('products').select('*').order('created_at', { ascending: false }),
+        supabase.from('store_settings').select(settingsCols).eq('id', 1).maybeSingle(),
+      ]);
+
+      if (setRes.error && hasStorefrontConfigCol && isMissingStorefrontColError(setRes.error)) {
+        hasStorefrontConfigCol = false;
+        setRes = await supabase
+          .from('store_settings')
+          .select('store_name, currency_symbol, free_shipping_threshold, support_email, integrations')
+          .eq('id', 1)
+          .maybeSingle();
+      }
+
+      if (!prodRes.error && prodRes.data) {
+        const settingsRow = setRes.data as Record<string, unknown> | null;
+        const rowStorefrontConfig = resolveStorefrontFromRow(settingsRow);
+        const resolvedSettings = settingsRow
+          ? {
+              storeName: String(settingsRow.store_name),
+              currencySymbol: String(settingsRow.currency_symbol),
+              freeShippingThreshold: Number(settingsRow.free_shipping_threshold),
+              supportEmail: String(settingsRow.support_email),
+              storefrontConfig: rowStorefrontConfig || memoryStore.settings.storefrontConfig,
+            }
+          : {
+              storeName: memoryStore.settings.storeName,
+              currencySymbol: memoryStore.settings.currencySymbol,
+              freeShippingThreshold: memoryStore.settings.freeShippingThreshold,
+              supportEmail: memoryStore.settings.supportEmail,
+              storefrontConfig: memoryStore.settings.storefrontConfig,
+            };
+
+        if (settingsRow) {
+          const { integrations: cleanInt } = extractIntegrationsAndConfig(settingsRow.integrations);
+          memoryStore.settings = {
+            ...resolvedSettings,
+            integrations: Array.isArray(settingsRow.integrations)
+              ? cleanInt
+              : memoryStore.settings.integrations,
+          };
+        }
+
+        const payload: PublicStorePayload = {
+          products: prodRes.data.map((r) => mapProductFromRow(r as Record<string, unknown>)),
+          settings: resolvedSettings,
+          persistence: 'supabase',
+        };
+        publicStoreCache = { data: payload, cachedAt: Date.now() };
+        return payload;
+      }
+    }
+
+    const fallback: PublicStorePayload = {
+      products: memoryStore.products,
+      settings: {
+        storeName: memoryStore.settings.storeName,
+        currencySymbol: memoryStore.settings.currencySymbol,
+        freeShippingThreshold: memoryStore.settings.freeShippingThreshold,
+        supportEmail: memoryStore.settings.supportEmail,
+        storefrontConfig: memoryStore.settings.storefrontConfig,
+      },
+      persistence: 'memory',
+    };
+    publicStoreCache = { data: fallback, cachedAt: Date.now() };
+    return fallback;
+  })();
+
+  try {
+    return await publicStoreInFlight;
+  } finally {
+    publicStoreInFlight = null;
+  }
 }
 
 export async function getAdminBundle() {
@@ -1185,8 +1312,11 @@ export async function createOrderInStore(input: {
 
     // Note: New checkout orders start as 'Pendente' (unpaid) and only add to weekly_sales when marked 'Entregue'.
 
+    invalidatePublicStoreCache();
     return { ...newOrder, customerId: resolvedCustomerId };
   }
+
+  invalidatePublicStoreCache();
 
   // Memory fallback
   let cust = memoryStore.customers.find((c) => c.email.toLowerCase() === normalizedEmail);
@@ -1457,8 +1587,11 @@ export async function createManualOrderInStore(input: {
       }
     }
 
+    invalidatePublicStoreCache();
     return { ...newOrder, customerId: resolvedCustomerId };
   }
+
+  invalidatePublicStoreCache();
 
   let cust = memoryStore.customers.find((c) => c.email.toLowerCase() === normalizedEmail);
   if (!cust) {
@@ -1663,8 +1796,11 @@ export async function deleteOrderInStore(orderId: string) {
         await supabase.from('customers').delete().eq('id', custId);
       }
     }
+    invalidatePublicStoreCache();
     return;
   }
+
+  invalidatePublicStoreCache();
 
   const target = memoryStore.orders.find((o) => o.id === orderId);
   if (!target) {
@@ -1760,8 +1896,11 @@ export async function createProductInStore(
       })
       .then(() => {}, () => {});
 
+    invalidatePublicStoreCache();
     return inserted ? mapProductFromRow(inserted as Record<string, unknown>) : created;
   }
+
+  invalidatePublicStoreCache();
 
   if (memoryStore.products.some((p) => p.sku.toLowerCase() === created.sku.toLowerCase())) {
     throw new Error(`Já existe um produto registado com o SKU ${created.sku}.`);
@@ -1863,8 +2002,11 @@ export async function updateProductInStore(id: string, updates: Partial<Product>
         })
         .then(() => {}, () => {});
     }
+    invalidatePublicStoreCache();
     return;
   }
+
+  invalidatePublicStoreCache();
 
   const prev = memoryStore.products.find((p) => p.id === id);
   memoryStore.products = memoryStore.products.map((p) =>
@@ -1891,8 +2033,10 @@ export async function deleteProductInStore(id: string) {
     if (error) {
       throw new Error(`Erro ao eliminar produto da base de dados (${error.message}).`);
     }
+    invalidatePublicStoreCache();
     return;
   }
+  invalidatePublicStoreCache();
   memoryStore.products = memoryStore.products.filter((p) => p.id !== id);
 }
 
@@ -2033,6 +2177,14 @@ export async function updateSettingsInStore(
           image: await persistImageAsset(supabase, b.image, 'banners'),
         }))
       );
+      if (merged.bottomBanner?.slides) {
+        merged.bottomBanner.slides = await Promise.all(
+          merged.bottomBanner.slides.map(async (s) => ({
+            ...s,
+            image: s.image ? await persistImageAsset(supabase, s.image, 'banners') : '',
+          }))
+        );
+      }
       if (merged.newsletter?.image) {
         merged.newsletter.image = await persistImageAsset(
           supabase,
@@ -2085,58 +2237,66 @@ export async function updateSettingsInStore(
     };
 
     if (Object.keys(rowUpdates).length > 0) {
-      let { data, error } = await supabase
-        .from('store_settings')
-        .update(rowUpdates)
-        .eq('id', 1)
-        .select('*');
+      const saved = await (async (): Promise<StoreSettings> => {
+        const { data, error } = await (async () => {
+          let res = await supabase
+            .from('store_settings')
+            .update(rowUpdates)
+            .eq('id', 1)
+            .select('*');
 
-      if (error && isMissingStorefrontColError(error)) {
-        hasStorefrontConfigCol = false;
-        delete rowUpdates.storefront_config;
-        const configToEmbed = nextStorefrontConfig || currentStorefrontConfig;
-        rowUpdates.integrations = packIntegrationsWithConfig(nextIntegrations, configToEmbed);
-        const retry = await supabase
-          .from('store_settings')
-          .update(rowUpdates)
-          .eq('id', 1)
-          .select('*');
-        data = retry.data;
-        error = retry.error;
-      }
+          if (res.error && isMissingStorefrontColError(res.error)) {
+            hasStorefrontConfigCol = false;
+            delete rowUpdates.storefront_config;
+            const configToEmbed = nextStorefrontConfig || currentStorefrontConfig;
+            rowUpdates.integrations = packIntegrationsWithConfig(nextIntegrations, configToEmbed);
+            res = await supabase
+              .from('store_settings')
+              .update(rowUpdates)
+              .eq('id', 1)
+              .select('*');
+          }
+          return res;
+        })();
 
-      if (error) {
-        throw new Error(`Não foi possível guardar as definições no Supabase (${error.message}).`);
-      }
-
-      if (!data || data.length === 0) {
-        const upsertPayload: Record<string, unknown> = {
-          id: 1,
-          store_name: updates.storeName ?? INITIAL_SETTINGS.storeName,
-          currency_symbol: updates.currencySymbol ?? INITIAL_SETTINGS.currencySymbol,
-          free_shipping_threshold:
-            updates.freeShippingThreshold ?? INITIAL_SETTINGS.freeShippingThreshold,
-          support_email: updates.supportEmail ?? INITIAL_SETTINGS.supportEmail,
-          integrations: rowUpdates.integrations ?? nextIntegrations,
-          ...rowUpdates,
-        };
-        const { data: upserted, error: upsertErr } = await supabase
-          .from('store_settings')
-          .upsert(upsertPayload, { onConflict: 'id' })
-          .select('*');
-        if (upsertErr) {
-          throw new Error(`Não foi possível guardar as definições no Supabase (${upsertErr.message}).`);
+        if (error) {
+          throw new Error(`Não foi possível guardar as definições no Supabase (${error.message}).`);
         }
-        const savedRow = upserted?.[0] as Record<string, unknown> | undefined;
-        if (savedRow) {
-          return mapRowToSettings(savedRow);
+
+        if (!data || data.length === 0) {
+          const upsertPayload: Record<string, unknown> = {
+            id: 1,
+            store_name: updates.storeName ?? INITIAL_SETTINGS.storeName,
+            currency_symbol: updates.currencySymbol ?? INITIAL_SETTINGS.currencySymbol,
+            free_shipping_threshold:
+              updates.freeShippingThreshold ?? INITIAL_SETTINGS.freeShippingThreshold,
+            support_email: updates.supportEmail ?? INITIAL_SETTINGS.supportEmail,
+            integrations: rowUpdates.integrations ?? nextIntegrations,
+            ...rowUpdates,
+          };
+          const { data: upserted, error: upsertErr } = await supabase
+            .from('store_settings')
+            .upsert(upsertPayload, { onConflict: 'id' })
+            .select('*');
+          if (upsertErr) {
+            throw new Error(`Não foi possível guardar as definições no Supabase (${upsertErr.message}).`);
+          }
+          const savedRow = upserted?.[0] as Record<string, unknown> | undefined;
+          if (savedRow) {
+            return mapRowToSettings(savedRow);
+          }
+        } else {
+          return mapRowToSettings(data[0] as Record<string, unknown>);
         }
-      } else {
-        return mapRowToSettings(data[0] as Record<string, unknown>);
-      }
+        return memoryStore.settings;
+      })();
+      invalidatePublicStoreCache();
+      return saved;
     }
+    invalidatePublicStoreCache();
     return memoryStore.settings;
   }
+  invalidatePublicStoreCache();
   memoryStore.settings = {
     ...memoryStore.settings,
     ...updates,
@@ -2242,6 +2402,7 @@ export async function deleteCostInStore(id: string) {
 }
 
 export async function resetDemoDataInStore() {
+  invalidatePublicStoreCache();
   memoryStore.products = [];
   memoryStore.customers = [];
   memoryStore.orders = [];
@@ -2251,6 +2412,8 @@ export async function resetDemoDataInStore() {
   memoryStore.campaigns = [];
   memoryStore.costs = [];
   memoryStore.newsletterEmails = [];
+  memoryStore.livePresence = [];
+  memoryStore.analyticsEvents = [];
   memoryStore.weeklySales = structuredClone(WEEKLY_SALES_DATA);
 
   const supabase = getSupabaseClient();
@@ -2268,6 +2431,10 @@ export async function resetDemoDataInStore() {
     if (hasStoreCostsTable) {
       await supabase.from('store_costs').delete().neq('id', '');
     }
+    if (hasAnalyticsTables) {
+      await supabase.from('store_presence').delete().neq('session_id', '');
+      await supabase.from('store_analytics_events').delete().neq('id', '');
+    }
     await supabase.from('weekly_sales').upsert(
       WEEKLY_SALES_DATA.map((w, idx) => ({
         day_index: idx,
@@ -2279,4 +2446,231 @@ export async function resetDemoDataInStore() {
       }))
     );
   }
+}
+
+async function ensureAnalyticsTablesReady(supabase: SupabaseClient): Promise<boolean> {
+  await ensureSupabaseSeeded(supabase).catch(() => false);
+  if (hasAnalyticsTables) return true;
+
+  const probe = await supabase.from('store_presence').select('session_id').limit(1);
+  if (!probe.error) {
+    hasAnalyticsTables = true;
+    return true;
+  }
+
+  const { url, key } = getCleanedSupabaseEnv();
+  const urlRefMatch = url?.match(/^https?:\/\/([a-z0-9-]+)\.supabase\.co/i);
+  const projectRef = urlRefMatch?.[1] || extractProjectRefFromJwt(key);
+  if (projectRef) {
+    await executeSupabaseSql(
+      projectRef,
+      `
+      create table if not exists public.store_presence (
+        session_id text primary key,
+        visitor_label text not null,
+        stage text not null default 'loja',
+        product_id text,
+        product_name text,
+        cart_count integer not null default 0,
+        cart_total numeric(12, 2) not null default 0,
+        cart_items_summary jsonb not null default '[]'::jsonb,
+        customer_name text,
+        customer_email text,
+        city text,
+        device text not null default 'Web',
+        started_at timestamptz not null default now(),
+        last_seen_at timestamptz not null default now(),
+        completed_order_id text
+      );
+      create table if not exists public.store_analytics_events (
+        id text primary key,
+        session_id text not null,
+        visitor_label text not null,
+        event_type text not null,
+        product_id text,
+        product_name text,
+        order_id text,
+        customer_name text,
+        customer_email text,
+        city text,
+        cart_count integer not null default 0,
+        cart_total numeric(12, 2) not null default 0,
+        details text,
+        device text,
+        created_at timestamptz not null default now()
+      );
+      create index if not exists idx_store_presence_last_seen on public.store_presence(last_seen_at desc);
+      create index if not exists idx_store_analytics_events_created on public.store_analytics_events(created_at desc);
+      create index if not exists idx_store_analytics_events_type on public.store_analytics_events(event_type);
+      alter table public.store_presence disable row level security;
+      alter table public.store_analytics_events disable row level security;
+      grant all on public.store_presence to anon, authenticated, service_role;
+      grant all on public.store_analytics_events to anon, authenticated, service_role;
+      `.trim()
+    ).catch(() => false);
+    const reProbe = await supabase.from('store_presence').select('session_id').limit(1);
+    hasAnalyticsTables = !reProbe.error;
+  }
+  return hasAnalyticsTables;
+}
+
+export async function upsertPresenceInStore(session: LiveVisitorSession): Promise<void> {
+  const existingIdx = memoryStore.livePresence.findIndex((s) => s.sessionId === session.sessionId);
+  if (existingIdx >= 0) {
+    memoryStore.livePresence[existingIdx] = session;
+  } else {
+    memoryStore.livePresence.unshift(session);
+    if (memoryStore.livePresence.length > 250) {
+      memoryStore.livePresence.length = 250;
+    }
+  }
+
+  const supabase = getSupabaseClient();
+  if (supabase && (await ensureAnalyticsTablesReady(supabase))) {
+    const { error } = await supabase.from('store_presence').upsert(
+      {
+        session_id: session.sessionId,
+        visitor_label: session.visitorLabel,
+        stage: session.stage,
+        product_id: session.productId ?? null,
+        product_name: session.productName ?? null,
+        cart_count: session.cartCount,
+        cart_total: session.cartTotal,
+        cart_items_summary: session.cartItemsSummary ?? [],
+        customer_name: session.customerName ?? null,
+        customer_email: session.customerEmail ?? null,
+        city: session.city ?? null,
+        device: session.device,
+        started_at: session.startedAt,
+        last_seen_at: session.lastSeenAt,
+        completed_order_id: session.completedOrderId ?? null,
+      },
+      { onConflict: 'session_id' }
+    );
+    if (error) {
+      console.warn('upsertPresenceInStore error:', error.code, error.message);
+    }
+  }
+}
+
+export async function removePresenceInStore(sessionId: string): Promise<void> {
+  memoryStore.livePresence = memoryStore.livePresence.filter((s) => s.sessionId !== sessionId);
+  const supabase = getSupabaseClient();
+  if (supabase && (await ensureAnalyticsTablesReady(supabase))) {
+    const { error } = await supabase.from('store_presence').delete().eq('session_id', sessionId);
+    if (error) {
+      console.warn('removePresenceInStore error:', error.code, error.message);
+    }
+  }
+}
+
+export async function recordAnalyticsEventInStore(event: StoreAnalyticsEvent): Promise<void> {
+  if (!memoryStore.analyticsEvents.some((e) => e.id === event.id)) {
+    memoryStore.analyticsEvents.unshift(event);
+    if (memoryStore.analyticsEvents.length > 500) {
+      memoryStore.analyticsEvents.length = 500;
+    }
+  }
+
+  const supabase = getSupabaseClient();
+  if (supabase && (await ensureAnalyticsTablesReady(supabase))) {
+    const { error } = await supabase.from('store_analytics_events').upsert(
+      {
+        id: event.id,
+        session_id: event.sessionId,
+        visitor_label: event.visitorLabel,
+        event_type: event.eventType,
+        product_id: event.productId ?? null,
+        product_name: event.productName ?? null,
+        order_id: event.orderId ?? null,
+        customer_name: event.customerName ?? null,
+        customer_email: event.customerEmail ?? null,
+        city: event.city ?? null,
+        cart_count: event.cartCount,
+        cart_total: event.cartTotal,
+        details: event.details ?? null,
+        device: event.device ?? null,
+        created_at: event.createdAt,
+      },
+      { onConflict: 'id' }
+    );
+    if (error) {
+      console.warn('recordAnalyticsEventInStore error:', error.code, error.message);
+    }
+  }
+}
+
+export async function getPersistedRealtimeSnapshot(limit = 300): Promise<{
+  sessions: LiveVisitorSession[];
+  events: StoreAnalyticsEvent[];
+}> {
+  const activeCutoffIso = new Date(Date.now() - 105_000).toISOString();
+  const supabase = getSupabaseClient();
+  if (supabase && (await ensureAnalyticsTablesReady(supabase))) {
+    const [presRes, evtRes] = await Promise.all([
+      supabase
+        .from('store_presence')
+        .select('*')
+        .gte('last_seen_at', activeCutoffIso)
+        .order('last_seen_at', { ascending: false })
+        .limit(200),
+      supabase
+        .from('store_analytics_events')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(limit),
+    ]);
+
+    if (presRes.error || evtRes.error) {
+      console.warn(
+        'getPersistedRealtimeSnapshot query warning:',
+        presRes.error?.message || evtRes.error?.message
+      );
+    } else {
+      const sessions: LiveVisitorSession[] = (presRes.data ?? []).map((r) => ({
+        sessionId: String(r.session_id),
+        visitorLabel: String(r.visitor_label),
+        stage: String(r.stage) as VisitorStage,
+        productId: r.product_id ? String(r.product_id) : undefined,
+        productName: r.product_name ? String(r.product_name) : undefined,
+        cartCount: Number(r.cart_count ?? 0),
+        cartTotal: Number(r.cart_total ?? 0),
+        cartItemsSummary: Array.isArray(r.cart_items_summary)
+          ? r.cart_items_summary.map(String)
+          : [],
+        customerName: r.customer_name ? String(r.customer_name) : undefined,
+        customerEmail: r.customer_email ? String(r.customer_email) : undefined,
+        city: r.city ? String(r.city) : undefined,
+        device: String(r.device || 'Web'),
+        startedAt: String(r.started_at),
+        lastSeenAt: String(r.last_seen_at),
+        completedOrderId: r.completed_order_id ? String(r.completed_order_id) : undefined,
+      }));
+
+      const events: StoreAnalyticsEvent[] = (evtRes.data ?? []).map((e) => ({
+        id: String(e.id),
+        sessionId: String(e.session_id),
+        visitorLabel: String(e.visitor_label),
+        eventType: String(e.event_type) as StoreAnalyticsEvent['eventType'],
+        productId: e.product_id ? String(e.product_id) : undefined,
+        productName: e.product_name ? String(e.product_name) : undefined,
+        orderId: e.order_id ? String(e.order_id) : undefined,
+        customerName: e.customer_name ? String(e.customer_name) : undefined,
+        customerEmail: e.customer_email ? String(e.customer_email) : undefined,
+        city: e.city ? String(e.city) : undefined,
+        cartCount: Number(e.cart_count ?? 0),
+        cartTotal: Number(e.cart_total ?? 0),
+        details: e.details ? String(e.details) : undefined,
+        device: e.device ? String(e.device) : undefined,
+        createdAt: String(e.created_at),
+      }));
+
+      return { sessions, events };
+    }
+  }
+
+  return {
+    sessions: memoryStore.livePresence.filter((s) => s.lastSeenAt >= activeCutoffIso),
+    events: memoryStore.analyticsEvents.slice(0, limit),
+  };
 }

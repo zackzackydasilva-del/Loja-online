@@ -25,8 +25,8 @@ export const StorefrontFooter: React.FC<StorefrontFooterProps> = ({ onNavigateCa
   };
 
   return (
-    <footer className="bg-white border-t border-black/[0.06] pt-10 pb-24 md:pb-10 text-[#111111]">
-      <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8">
+    <footer className="bg-white border-t border-black/[0.06] pt-10 lg:pt-12 pb-24 md:pb-12 text-[#111111]">
+      <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-8 pb-8 border-b border-black/[0.06]">
           <div className="md:col-span-5 space-y-2.5">
             <p className="font-serif text-xl tracking-[0.14em] font-semibold">{wordmark}</p>

@@ -28,6 +28,7 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
 }) => {
   const {
     products,
+    isStoreLoaded,
     selectedCategory,
     setSelectedCategory,
     searchQuery,
@@ -171,12 +172,12 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
   return (
     <section
       id="catalog"
-      className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 pt-4 pb-12 space-y-8"
+      className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 pt-4 lg:pt-6 pb-10 lg:pb-12 space-y-8 lg:space-y-10"
     >
       {/* ALWAYS-VISIBLE HORIZONTAL CAROUSEL: "As Nossas Escolhas Favoritas" */}
       <div className="space-y-4">
         <div className="flex items-center justify-between gap-4">
-          <h2 className="text-[17px] sm:text-xl font-semibold text-[#111111] tracking-tight">
+          <h2 className="text-[17px] sm:text-xl lg:text-2xl font-semibold text-[#111111] tracking-tight">
             {cfg.catalogTitle || 'As Nossas Escolhas Favoritas'}
           </h2>
 
@@ -217,16 +218,25 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
           </div>
         </div>
 
-        {favoriteCarouselProducts.length === 0 ? (
-          <div className="bg-[#F3F3F3] rounded-[22px] p-8 text-center">
-            <p className="text-sm sm:text-base font-semibold text-[#111111] mb-1">
-              O catálogo da loja aguarda as primeiras peças
-            </p>
-            <p className="text-xs sm:text-sm text-[#666666]">
-              Novas peças exclusivas serão apresentadas aqui em breve.
-            </p>
+        {favoriteCarouselProducts.length === 0 && !isStoreLoaded ? (
+          <div className="flex items-stretch gap-4 sm:gap-5 overflow-hidden pb-2">
+            {[0, 1, 2, 3].map((idx) => (
+              <div
+                key={`skel-card-${idx}`}
+                className="w-[68%] sm:w-[44%] md:w-[31%] lg:w-[23.8%] shrink-0 rounded-[22px] bg-[#F3F3F3] p-4 space-y-3 animate-pulse"
+              >
+                <div className="flex justify-between items-center">
+                  <div className="w-8 h-8 rounded-full bg-black/8" />
+                  <div className="w-14 h-3 rounded-full bg-black/8" />
+                </div>
+                <div className="w-full aspect-[3/4] rounded-[16px] bg-white/80" />
+                <div className="h-4 w-3/4 mx-auto rounded-full bg-black/8" />
+                <div className="h-3 w-1/3 mx-auto rounded-full bg-black/8" />
+                <div className="h-8 w-full rounded-full bg-black/10" />
+              </div>
+            ))}
           </div>
-        ) : (
+        ) : favoriteCarouselProducts.length > 0 ? (
           <div
             ref={carouselRef}
             className="flex items-stretch gap-4 sm:gap-5 overflow-x-auto snap-x snap-mandatory scroll-smooth pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
@@ -234,11 +244,11 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
             {favoriteCarouselProducts.map((product) =>
               renderProductCard(
                 product,
-                'w-[68%] sm:w-[44%] md:w-[31%] lg:w-[29.5%] shrink-0 snap-start'
+                'w-[68%] sm:w-[44%] md:w-[31%] lg:w-[23.8%] shrink-0 snap-start'
               )
             )}
           </div>
-        )}
+        ) : null}
       </div>
 
       {/* FILTERABLE CATALOG GRID SECTION */}
@@ -269,16 +279,22 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
           </div>
 
           {products.length > 0 && (
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
-              aria-label="Ordenar produtos"
-              className="hidden sm:block bg-[#EFEFEF] rounded-full px-3.5 py-2 text-xs font-medium text-[#111111] focus:outline-none cursor-pointer shrink-0"
-            >
-              <option value="featured">Destaques</option>
-              <option value="price-asc">Menor Preço</option>
-              <option value="price-desc">Maior Preço</option>
-            </select>
+            <div className="hidden sm:flex items-center gap-3 shrink-0">
+              <span className="hidden lg:inline text-xs text-[#777777] font-mono tabular-nums">
+                {filteredProducts.length}{' '}
+                {filteredProducts.length === 1 ? 'artigo' : 'artigos'}
+              </span>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+                aria-label="Ordenar produtos"
+                className="bg-[#EFEFEF] rounded-full px-3.5 py-2 text-xs font-medium text-[#111111] focus:outline-none cursor-pointer shrink-0"
+              >
+                <option value="featured">Destaques</option>
+                <option value="price-asc">Menor Preço</option>
+                <option value="price-desc">Maior Preço</option>
+              </select>
+            </div>
           )}
         </div>
 
@@ -320,7 +336,7 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
             </button>
           </div>
         ) : filteredProducts.length > 0 ? (
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-5 lg:gap-6">
             {filteredProducts.map((product) => renderProductCard(product))}
           </div>
         ) : null}

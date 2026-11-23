@@ -26,6 +26,13 @@ import {
   updateTaskInStore,
   uploadImageAssetInStore,
 } from './storeRepository.ts';
+import {
+  getAuthoritativeRealtimeSnapshot,
+  processPresenceLeaveAsync,
+  processPresenceUpdateAsync,
+  recordOrderCompletionAnalyticsAsync,
+  registerSseAdminClient,
+} from './presenceHub.ts';
 import type { OrderStatus, ProductColorVariant, StoreCostCategory } from '../types/store.ts';
 
 export const app = express();
@@ -60,7 +67,7 @@ const DEFAULT_ADMIN_PASSCODE = (process.env.DEFAULT_ADMIN_PASSCODE || 'DozaEliza
   .trim()
   .replace(/^["']|["']$/g, '');
 
-const jsonParser = express.json({ limit: '12mb' });
+const jsonParser = express.json({ limit: '12mb', type: ['application/json', 'text/plain'] });
 app.use((req, res, next) => {
   // Vercel's Node runtime may pre-parse req.body before Express middleware runs
   if (
@@ -121,7 +128,7 @@ function signAdminToken(): string {
   return `${payload}.${sig}`;
 }
 
-function verifyAdminToken(token: string): boolean {
+export function verifyAdminToken(token: string): boolean {
   const parts = token.split('.');
   if (parts.length !== 2) return false;
   const [payload, sig] = parts;
@@ -219,11 +226,94 @@ app.post('/api/orders', async (req, res) => {
       discountApplied: Boolean(body.discountApplied),
     });
 
+    await recordOrderCompletionAnalyticsAsync(
+      order,
+      typeof body.sessionId === 'string' ? body.sessionId : undefined
+    );
+
     res.status(201).json(order);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Erro ao registar encomenda.';
     res.status(400).json({ error: message });
   }
+});
+
+// Lightweight Real-Time Visitor Presence & Analytics Tracking
+app.post('/api/analytics/presence', async (req, res) => {
+  try {
+    const body = req.body ?? {};
+    const sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : '';
+    if (!sessionId) {
+      res.status(400).json({ error: 'sessionId em falta.' });
+      return;
+    }
+    if (body.action === 'leave') {
+      await processPresenceLeaveAsync(sessionId);
+      res.json({ ok: true });
+      return;
+    }
+    await processPresenceUpdateAsync({
+      sessionId,
+      visitorLabel: body.visitorLabel,
+      stage: body.stage,
+      productId: body.productId,
+      productName: body.productName,
+      cartCount: body.cartCount,
+      cartTotal: body.cartTotal,
+      cartItemsSummary: body.cartItemsSummary,
+      customerName: body.customerName,
+      customerEmail: body.customerEmail,
+      city: body.city,
+      device: body.device,
+      completedOrderId: body.completedOrderId,
+      eventId: body.eventId,
+      details: body.details,
+    });
+    res.json({ ok: true });
+  } catch {
+    res.status(400).json({ error: 'Dados inválidos.' });
+  }
+});
+
+app.get('/api/admin/analytics/live', requireAdminAuth, async (_req, res) => {
+  try {
+    const snapshot = await getAuthoritativeRealtimeSnapshot();
+    res.json(snapshot);
+  } catch (err) {
+    console.error('GET /api/admin/analytics/live failed:', err);
+    res.status(500).json({ error: 'Falha ao carregar analítico em tempo real.' });
+  }
+});
+
+app.get('/api/admin/analytics/stream', (req, res) => {
+  const header = req.headers.authorization;
+  const queryToken = typeof req.query.token === 'string' ? req.query.token : '';
+  const token =
+    header && header.startsWith('Bearer ')
+      ? header.slice('Bearer '.length).trim()
+      : queryToken.trim();
+
+  if (!token || !verifyAdminToken(token)) {
+    res.status(401).json({ error: 'Sessão de gestão necessária.' });
+    return;
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  const unregister = registerSseAdminClient(res);
+  const keepAlive = setInterval(() => {
+    if (!res.writableEnded) {
+      res.write(': keepalive\n\n');
+    }
+  }, 20_000);
+
+  req.on('close', () => {
+    clearInterval(keepAlive);
+    unregister();
+  });
 });
 
 app.post('/api/newsletter', async (req, res) => {
@@ -699,6 +789,16 @@ app.patch('/api/admin/settings', requireAdminAuth, async (req, res) => {
               b && typeof b.image === 'string' && (b.image.trim() === '' || isSafeAssetUrl(b.image))
           )
           .map((b: any) => ({ ...b, image: b.image.trim() === '' ? '' : b.image }));
+      }
+      if (cfg.bottomBanner && typeof cfg.bottomBanner === 'object') {
+        if (Array.isArray(cfg.bottomBanner.slides)) {
+          cfg.bottomBanner.slides = cfg.bottomBanner.slides
+            .filter(
+              (s: any) =>
+                s && typeof s.image === 'string' && (s.image.trim() === '' || isSafeAssetUrl(s.image))
+            )
+            .map((s: any) => ({ ...s, image: s.image.trim() === '' ? '' : s.image }));
+        }
       }
       if (cfg.newsletter?.image !== undefined) {
         const nlImg = String(cfg.newsletter.image).trim();

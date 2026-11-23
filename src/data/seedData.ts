@@ -117,6 +117,18 @@ export const DEFAULT_STOREFRONT_CONFIG: StorefrontConfig = {
       image: '',
     },
   ],
+  bottomBanner: {
+    title: 'Curadoria da Estação',
+    subtitle:
+      'Explore os novos destaques disponíveis na coleção e receba com pagamento apenas no ato da entrega.',
+    ctaText: 'Ver Coleção',
+    targetCategory: 'Todos',
+    slides: [
+      { index: '01', image: '', caption: 'Banner Inferior 01' },
+      { index: '02', image: '', caption: 'Banner Inferior 02' },
+      { index: '03', image: '', caption: 'Banner Inferior 03' },
+    ],
+  },
   catalogEyebrow: 'Catálogo',
   catalogTitle: 'As Nossas Escolhas Favoritas',
   guarantees: [

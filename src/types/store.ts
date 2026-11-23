@@ -171,6 +171,14 @@ export interface PromoBannerConfig {
   image: string;
 }
 
+export interface BottomBannerConfig {
+  title: string;
+  subtitle: string;
+  ctaText: string;
+  targetCategory: ProductCategory | 'Todos';
+  slides: HeroSlideConfig[];
+}
+
 export interface StorefrontConfig {
   topNoticeText?: string;
   headerWordmark: string;
@@ -195,6 +203,7 @@ export interface StorefrontConfig {
   collectionsActionText: string;
   editorialCards: EditorialCardConfig[];
   promoBanners: PromoBannerConfig[];
+  bottomBanner?: BottomBannerConfig;
   catalogEyebrow: string;
   catalogTitle: string;
   guarantees: TrustBadgeConfig[];
@@ -232,3 +241,42 @@ export interface StoreSettings {
   }[];
   storefrontConfig: StorefrontConfig;
 }
+
+export type VisitorStage = 'loja' | 'produto' | 'saco' | 'checkout' | 'comprou';
+
+export interface LiveVisitorSession {
+  sessionId: string;
+  visitorLabel: string;
+  stage: VisitorStage;
+  productId?: string;
+  productName?: string;
+  cartCount: number;
+  cartTotal: number;
+  cartItemsSummary?: string[];
+  customerName?: string;
+  customerEmail?: string;
+  city?: string;
+  device: string;
+  startedAt: string;
+  lastSeenAt: string;
+  completedOrderId?: string;
+}
+
+export interface StoreAnalyticsEvent {
+  id: string;
+  sessionId: string;
+  visitorLabel: string;
+  eventType: VisitorStage | 'saida';
+  productId?: string;
+  productName?: string;
+  orderId?: string;
+  customerName?: string;
+  customerEmail?: string;
+  city?: string;
+  cartCount: number;
+  cartTotal: number;
+  details?: string;
+  device?: string;
+  createdAt: string;
+}
+

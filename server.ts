@@ -1,7 +1,9 @@
 import fs from 'node:fs';
+import http from 'node:http';
 import path from 'node:path';
 import express from 'express';
-import { app } from './src/server/apiApp.ts';
+import { app, verifyAdminToken } from './src/server/apiApp.ts';
+import { attachPresenceWebSocket } from './src/server/presenceHub.ts';
 
 const PORT = Number(process.env.PORT) || 3000;
 
@@ -30,7 +32,10 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const httpServer = http.createServer(app);
+  attachPresenceWebSocket(httpServer, verifyAdminToken);
+
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`Lunora server listening on http://0.0.0.0:${PORT}`);
   });
 }

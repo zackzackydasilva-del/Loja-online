@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { FileText, Plus, Receipt, Trash2, Wallet } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
-import { OrderStatus, StoreCostCategory, StoreOrder } from '../../types/store';
+import { OrderStatus, StoreCost, StoreCostCategory, StoreOrder } from '../../types/store';
 import { formatMoney } from '../../utils/currency';
 import { OrderInvoiceModal } from './OrderInvoiceModal';
 
@@ -15,10 +15,20 @@ const COST_CATEGORIES: StoreCostCategory[] = [
 
 interface FinancialSummaryPanelProps {
   compact?: boolean;
+  filteredOrders?: StoreOrder[];
+  filteredCosts?: StoreCost[];
+  periodLabel?: string;
 }
 
-export const FinancialSummaryPanel: React.FC<FinancialSummaryPanelProps> = ({ compact = false }) => {
+export const FinancialSummaryPanel: React.FC<FinancialSummaryPanelProps> = ({
+  compact = false,
+  filteredOrders,
+  filteredCosts,
+  periodLabel,
+}) => {
   const { orders, costs, settings, addCost, deleteCost, updateOrderStatus } = useStore();
+  const activeOrders = filteredOrders ?? orders;
+  const activeCosts = filteredCosts ?? costs;
 
   const [costFormOpen, setCostFormOpen] = useState(false);
   const [title, setTitle] = useState('');
@@ -29,13 +39,13 @@ export const FinancialSummaryPanel: React.FC<FinancialSummaryPanelProps> = ({ co
   const [errorMsg, setErrorMsg] = useState('');
   const [invoiceOrderId, setInvoiceOrderId] = useState<string | null>(null);
 
-  const paidOrders = orders.filter((o) => o.status === 'Entregue');
-  const pendingOrders = orders.filter((o) => o.status !== 'Entregue');
+  const paidOrders = activeOrders.filter((o) => o.status === 'Entregue');
+  const pendingOrders = activeOrders.filter((o) => o.status !== 'Entregue');
   const invoiceOrder: StoreOrder | null =
     orders.find((o) => o.id === invoiceOrderId) || null;
 
   const grossRevenue = paidOrders.reduce((sum, o) => sum + o.total, 0);
-  const totalCosts = costs.reduce((sum, c) => sum + c.amount, 0);
+  const totalCosts = activeCosts.reduce((sum, c) => sum + c.amount, 0);
   const netRevenue = grossRevenue - totalCosts;
   const averagePerSale = paidOrders.length > 0 ? grossRevenue / paidOrders.length : 0;
   const netMarginPercent =
@@ -105,7 +115,7 @@ export const FinancialSummaryPanel: React.FC<FinancialSummaryPanelProps> = ({ co
             {formatMoney(totalCosts, settings.currencySymbol)}
           </p>
           <p className="text-[11px] text-[#72726E] tabular-nums">
-            {costs.length} custo(s) lançados na gestão
+            {activeCosts.length} custo(s) lançados{periodLabel ? ` · ${periodLabel}` : ' na gestão'}
           </p>
         </div>
 
@@ -283,7 +293,7 @@ export const FinancialSummaryPanel: React.FC<FinancialSummaryPanelProps> = ({ co
         <div className="lg:col-span-5 bg-white rounded-[24px] p-5 border border-black/5 space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold text-[#1C1C1E]">
-              Custos Registados ({costs.length})
+              Custos Registados ({activeCosts.length})
             </h3>
             {!costFormOpen && (
               <button
@@ -296,15 +306,15 @@ export const FinancialSummaryPanel: React.FC<FinancialSummaryPanelProps> = ({ co
             )}
           </div>
 
-          {costs.length === 0 ? (
+          {activeCosts.length === 0 ? (
             <div className="py-8 text-center space-y-2">
               <p className="text-xs text-[#8A8A85]">
-                Sem custos registados. Adicione os seus custos para apurar o faturamento líquido.
+                Sem custos registados para este período. Adicione os seus custos para apurar o faturamento líquido.
               </p>
             </div>
           ) : (
             <div className="divide-y divide-black/5 max-h-72 overflow-y-auto pr-1">
-              {costs.map((cost) => (
+              {activeCosts.map((cost) => (
                 <div
                   key={cost.id}
                   className="py-2.5 flex items-center justify-between gap-3 text-xs"

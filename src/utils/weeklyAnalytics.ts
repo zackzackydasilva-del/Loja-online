@@ -1,4 +1,4 @@
-import { Product, StoreOrder } from '../types/store';
+import { Product, StoreCost, StoreOrder } from '../types/store';
 
 export interface WeeklyDayStats {
   dayIndex: number; // 0 = Segunda ... 6 = Domingo
@@ -16,6 +16,22 @@ export interface WeeklyDayStats {
   deltaPercent: number;
 }
 
+export type StatsPeriodPreset =
+  | 'all'
+  | 'today'
+  | 'yesterday'
+  | 'last7'
+  | 'last30'
+  | 'day'
+  | 'custom';
+
+export interface StatsDateFilter {
+  preset: StatsPeriodPreset;
+  specificDate?: string; // YYYY-MM-DD
+  startDate?: string; // YYYY-MM-DD
+  endDate?: string; // YYYY-MM-DD
+}
+
 const WEEKDAY_META: { day: string; fullDay: string }[] = [
   { day: 'S', fullDay: 'Segunda' },
   { day: 'T', fullDay: 'Terça' },
@@ -26,11 +42,106 @@ const WEEKDAY_META: { day: string; fullDay: string }[] = [
   { day: 'D', fullDay: 'Domingo' },
 ];
 
-function formatLocalIsoDate(date: Date): string {
+export function formatLocalIsoDate(date = new Date()): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
   const d = String(date.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
+}
+
+export function parseLocalIsoDate(iso: string): Date {
+  const clean = String(iso || '').trim().slice(0, 10);
+  const parts = clean.split('-').map(Number);
+  if (parts.length === 3 && parts.every((n) => Number.isFinite(n))) {
+    return new Date(parts[0], parts[1] - 1, parts[2]);
+  }
+  return new Date();
+}
+
+export function shiftIsoDate(iso: string, deltaDays: number): string {
+  const dt = parseLocalIsoDate(iso);
+  dt.setDate(dt.getDate() + deltaDays);
+  return formatLocalIsoDate(dt);
+}
+
+export function resolvePeriodBounds(
+  filter: StatsDateFilter,
+  now = new Date()
+): { startIso: string | null; endIso: string | null; label: string } {
+  const todayIso = formatLocalIsoDate(now);
+  switch (filter.preset) {
+    case 'today':
+      return { startIso: todayIso, endIso: todayIso, label: `Hoje (${todayIso})` };
+    case 'yesterday': {
+      const y = shiftIsoDate(todayIso, -1);
+      return { startIso: y, endIso: y, label: `Ontem (${y})` };
+    }
+    case 'last7': {
+      const start = shiftIsoDate(todayIso, -6);
+      return { startIso: start, endIso: todayIso, label: `Últimos 7 dias (${start} a ${todayIso})` };
+    }
+    case 'last30': {
+      const start = shiftIsoDate(todayIso, -29);
+      return { startIso: start, endIso: todayIso, label: `Últimos 30 dias (${start} a ${todayIso})` };
+    }
+    case 'day': {
+      const target = (filter.specificDate || todayIso).slice(0, 10);
+      return { startIso: target, endIso: target, label: `Dia ${target}` };
+    }
+    case 'custom': {
+      const s = filter.startDate ? filter.startDate.slice(0, 10) : null;
+      const e = filter.endDate ? filter.endDate.slice(0, 10) : null;
+      const startIso = s && e && s > e ? e : s;
+      const endIso = s && e && s > e ? s : e;
+      return {
+        startIso,
+        endIso,
+        label:
+          startIso && endIso
+            ? `${startIso} a ${endIso}`
+            : startIso
+            ? `Desde ${startIso}`
+            : endIso
+            ? `Até ${endIso}`
+            : 'Período personalizado',
+      };
+    }
+    case 'all':
+    default:
+      return { startIso: null, endIso: null, label: 'Todo o histórico' };
+  }
+}
+
+export function isIsoDateWithinBounds(
+  dateStr: string,
+  startIso: string | null,
+  endIso: string | null
+): boolean {
+  const clean = String(dateStr || '').trim().slice(0, 10);
+  if (!clean) return !startIso && !endIso;
+  if (startIso && clean < startIso) return false;
+  if (endIso && clean > endIso) return false;
+  return true;
+}
+
+export function filterOrdersByDateFilter(
+  orders: StoreOrder[],
+  filter: StatsDateFilter,
+  now = new Date()
+): StoreOrder[] {
+  const { startIso, endIso } = resolvePeriodBounds(filter, now);
+  if (!startIso && !endIso) return orders;
+  return orders.filter((o) => isIsoDateWithinBounds(o.createdAt, startIso, endIso));
+}
+
+export function filterCostsByDateFilter(
+  costs: StoreCost[],
+  filter: StatsDateFilter,
+  now = new Date()
+): StoreCost[] {
+  const { startIso, endIso } = resolvePeriodBounds(filter, now);
+  if (!startIso && !endIso) return costs;
+  return costs.filter((c) => isIsoDateWithinBounds(c.date, startIso, endIso));
 }
 
 export function getTodayWeekdayIndex(referenceDate = new Date()): number {

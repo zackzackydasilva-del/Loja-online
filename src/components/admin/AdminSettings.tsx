@@ -44,6 +44,14 @@ function mergeStorefrontConfig(cfg?: Partial<StorefrontConfig>): StorefrontConfi
       cfg?.promoBanners && cfg.promoBanners.length > 0
         ? cfg.promoBanners
         : DEFAULT_STOREFRONT_CONFIG.promoBanners,
+    bottomBanner: {
+      ...DEFAULT_STOREFRONT_CONFIG.bottomBanner!,
+      ...(cfg?.bottomBanner || {}),
+      slides:
+        cfg?.bottomBanner?.slides && cfg.bottomBanner.slides.length > 0
+          ? cfg.bottomBanner.slides
+          : DEFAULT_STOREFRONT_CONFIG.bottomBanner!.slides,
+    },
     guarantees:
       cfg?.guarantees && cfg.guarantees.length > 0
         ? cfg.guarantees
@@ -223,7 +231,7 @@ export const AdminSettings: React.FC = () => {
     icon: React.ComponentType<{ className?: string }>;
   }[] = [
     { id: 'geral', label: 'Geral, Marca & Menu', icon: SlidersHorizontal },
-    { id: 'banner', label: 'Banner Principal da Loja', icon: Sparkles },
+    { id: 'banner', label: 'Banners da Loja (Topo & Rodapé)', icon: Sparkles },
     { id: 'catalogo_rodape', label: 'Catálogo, Código Promo & Rodapé', icon: LayoutTemplate },
   ];
 
@@ -690,195 +698,423 @@ export const AdminSettings: React.FC = () => {
         </div>
       )}
 
-      {/* SECTION 2: BANNER PRINCIPAL DA LOJA (Textos, Botão & Slides/Miniaturas) */}
+      {/* SECTION 2: BANNERS DA LOJA (Topo & Banner Inferior Após Produtos) */}
       {section === 'banner' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-          <div className="lg:col-span-5 bg-white rounded-[24px] p-6 border border-black/5 space-y-4">
-            <div>
-              <h3 className="text-base font-semibold text-[#1C1C1E]">
-                Textos & Botão do Banner Escuro
-              </h3>
-              <p className="text-[11px] text-[#72726E] mt-0.5">
-                Estes detalhes aparecem diretamente no cartão escuro principal no topo da loja.
-              </p>
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+            <div className="lg:col-span-5 bg-white rounded-[24px] p-6 border border-black/5 space-y-4">
+              <div>
+                <h3 className="text-base font-semibold text-[#1C1C1E]">
+                  Banner Principal (Topo da Loja)
+                </h3>
+                <p className="text-[11px] text-[#72726E] mt-0.5">
+                  Estes detalhes aparecem diretamente no cartão escuro principal no topo da loja.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-[#555552] mb-1">
+                  Título em Destaque (exibido em maiúsculas)
+                </label>
+                <input
+                  type="text"
+                  value={sf.heroTitle}
+                  onChange={(e) => updateSfDraft({ ...sf, heroTitle: e.target.value })}
+                  placeholder="Ex: Essenciais da Estação"
+                  className="w-full border border-black/15 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:border-[#1C1C1E]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-[#555552] mb-1">
+                  Subtítulo Curto (até 2 linhas no banner)
+                </label>
+                <textarea
+                  rows={3}
+                  value={sf.heroSubtitle}
+                  onChange={(e) => updateSfDraft({ ...sf, heroSubtitle: e.target.value })}
+                  className="w-full border border-black/15 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:border-[#1C1C1E]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-[#555552] mb-1">
+                  Texto do Botão Branco (CTA)
+                </label>
+                <input
+                  type="text"
+                  value={sf.heroPrimaryCta}
+                  onChange={(e) => updateSfDraft({ ...sf, heroPrimaryCta: e.target.value })}
+                  placeholder="Ex: Explorar Coleção"
+                  className="w-full border border-black/15 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:border-[#1C1C1E]"
+                />
+              </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-medium text-[#555552] mb-1">
-                Título em Destaque (exibido em maiúsculas)
-              </label>
-              <input
-                type="text"
-                value={sf.heroTitle}
-                onChange={(e) => updateSfDraft({ ...sf, heroTitle: e.target.value })}
-                placeholder="Ex: Essenciais da Estação"
-                className="w-full border border-black/15 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:border-[#1C1C1E]"
-              />
-            </div>
+            <div className="lg:col-span-7 bg-white rounded-[24px] p-6 border border-black/5 space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-base font-semibold text-[#1C1C1E]">
+                    Slides & Miniaturas do Banner Principal ({sf.heroSlides.length})
+                  </h3>
+                  <p className="text-[11px] text-[#72726E] mt-0.5">
+                    As primeiras 3 imagens aparecem como miniaturas clicáveis no banner e nos pontos de navegação por baixo. Tamanho ideal:{' '}
+                    <span className="font-mono font-semibold text-[#1C1C1E]">900 × 1050 px</span>{' '}
+                    (vertical 4:5 · mín. 700 × 820 px).
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextNum = String(sf.heroSlides.length + 1).padStart(2, '0');
+                    updateSfDraft({
+                      ...sf,
+                      heroSlides: [
+                        ...sf.heroSlides,
+                        {
+                          index: nextNum,
+                          image: '',
+                          caption: `Look ${nextNum}`,
+                        },
+                      ],
+                    });
+                  }}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-[#1C1C1E] text-white text-xs font-medium cursor-pointer shrink-0"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Adicionar Slide</span>
+                </button>
+              </div>
 
-            <div>
-              <label className="block text-xs font-medium text-[#555552] mb-1">
-                Subtítulo Curto (até 2 linhas no banner)
-              </label>
-              <textarea
-                rows={3}
-                value={sf.heroSubtitle}
-                onChange={(e) => updateSfDraft({ ...sf, heroSubtitle: e.target.value })}
-                className="w-full border border-black/15 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:border-[#1C1C1E]"
-              />
-            </div>
+              <div className="space-y-4">
+                {sf.heroSlides.map((slide, idx) => (
+                  <div key={idx} className="p-4 rounded-2xl bg-[#F6F6F4] space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-mono font-semibold text-[#1C1C1E]">
+                        Slide {String(idx + 1).padStart(2, '0')}
+                      </span>
+                      <div className="flex items-center gap-3">
+                        {slide.image?.trim() && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const next = [...sf.heroSlides];
+                              next[idx] = { ...next[idx], image: '' };
+                              persistStorefrontDraft({ ...sf, heroSlides: next });
+                            }}
+                            className="inline-flex items-center gap-1 text-[11px] text-[#555552] hover:text-[#1C1C1E] hover:underline cursor-pointer"
+                          >
+                            <span>Remover Imagem</span>
+                          </button>
+                        )}
+                        {sf.heroSlides.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const filtered = sf.heroSlides
+                                .filter((_, i) => i !== idx)
+                                .map((item, i) => ({
+                                  ...item,
+                                  index: String(i + 1).padStart(2, '0'),
+                                }));
+                              persistStorefrontDraft({ ...sf, heroSlides: filtered });
+                            }}
+                            className="inline-flex items-center gap-1 text-[11px] text-red-700 hover:underline cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Remover Slide</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
 
-            <div>
-              <label className="block text-xs font-medium text-[#555552] mb-1">
-                Texto do Botão Branco (CTA)
-              </label>
-              <input
-                type="text"
-                value={sf.heroPrimaryCta}
-                onChange={(e) => updateSfDraft({ ...sf, heroPrimaryCta: e.target.value })}
-                placeholder="Ex: Explorar Coleção"
-                className="w-full border border-black/15 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:border-[#1C1C1E]"
-              />
+                    <div>
+                      <label className="block text-xs font-medium text-[#555552] mb-1">
+                        Descrição / Alt da Imagem
+                      </label>
+                      <input
+                        type="text"
+                        value={slide.caption}
+                        onChange={(e) => {
+                          const next = [...sf.heroSlides];
+                          next[idx] = { ...next[idx], caption: e.target.value };
+                          updateSfDraft({ ...sf, heroSlides: next });
+                        }}
+                        className="w-full bg-white border border-black/15 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#1C1C1E]"
+                      />
+                    </div>
+
+                    <ImageField
+                      label="Fotografia do Banner"
+                      recommendedSize="900 × 1050 px (vertical 4:5 · mín. 700 × 820 px)"
+                      value={slide.image}
+                      allowEmpty
+                      uploadFolder="banners"
+                      onChange={(url) => {
+                        const next = [...sf.heroSlides];
+                        next[idx] = { ...next[idx], image: url };
+                        const nextSf = { ...sf, heroSlides: next };
+                        const shouldAutoSave =
+                          url === '' ||
+                          url.startsWith('data:image/') ||
+                          url.includes('/storage/v1/object/public/') ||
+                          url.startsWith('/src/assets/images/');
+                        if (shouldAutoSave) {
+                          persistStorefrontDraft(nextSf);
+                        } else {
+                          updateSfDraft(nextSf);
+                        }
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+
+              <div className="pt-2 flex flex-wrap items-center justify-end gap-3 border-t border-black/6">
+                {savedNotice && (
+                  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+                    <Check className="w-4 h-4" />
+                    <span>Banner guardado permanentemente</span>
+                  </span>
+                )}
+                {saveError && <span className="text-xs text-red-700">{saveError}</span>}
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => handleSaveAll()}
+                  className="px-5 py-2.5 bg-[#1C1C1E] text-white text-xs font-medium rounded-full hover:bg-[#323235] disabled:opacity-60 cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  {saving ? 'A guardar...' : 'Guardar Banner'}
+                </button>
+              </div>
             </div>
           </div>
 
-          <div className="lg:col-span-7 bg-white rounded-[24px] p-6 border border-black/5 space-y-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-base font-semibold text-[#1C1C1E]">
-                  Slides & Miniaturas do Banner ({sf.heroSlides.length})
-                </h3>
-                <p className="text-[11px] text-[#72726E] mt-0.5">
-                  As primeiras 3 imagens aparecem como miniaturas clicáveis no banner e nos pontos de navegação por baixo. Tamanho ideal:{' '}
-                  <span className="font-mono font-semibold text-[#1C1C1E]">900 × 1050 px</span>{' '}
-                  (vertical 4:5 · mín. 700 × 820 px).
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  const nextNum = String(sf.heroSlides.length + 1).padStart(2, '0');
-                  updateSfDraft({
-                    ...sf,
-                    heroSlides: [
-                      ...sf.heroSlides,
-                      {
-                        index: nextNum,
-                        image: '',
-                        caption: `Look ${nextNum}`,
-                      },
-                    ],
-                  });
-                }}
-                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-[#1C1C1E] text-white text-xs font-medium cursor-pointer shrink-0"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Adicionar Slide</span>
-              </button>
-            </div>
+          {/* BANNER INFERIOR (APÓS OS PRODUTOS) */}
+          {(() => {
+            const bottom = sf.bottomBanner || DEFAULT_STOREFRONT_CONFIG.bottomBanner!;
+            const updateBottom = (patch: Partial<typeof bottom>) =>
+              updateSfDraft({ ...sf, bottomBanner: { ...bottom, ...patch } });
 
-            <div className="space-y-4">
-              {sf.heroSlides.map((slide, idx) => (
-                <div key={idx} className="p-4 rounded-2xl bg-[#F6F6F4] space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-mono font-semibold text-[#1C1C1E]">
-                      Slide {String(idx + 1).padStart(2, '0')}
-                    </span>
-                    <div className="flex items-center gap-3">
-                      {slide.image?.trim() && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const next = [...sf.heroSlides];
-                            next[idx] = { ...next[idx], image: '' };
-                            persistStorefrontDraft({ ...sf, heroSlides: next });
-                          }}
-                          className="inline-flex items-center gap-1 text-[11px] text-[#555552] hover:text-[#1C1C1E] hover:underline cursor-pointer"
-                        >
-                          <span>Remover Imagem</span>
-                        </button>
-                      )}
-                      {sf.heroSlides.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const filtered = sf.heroSlides
-                              .filter((_, i) => i !== idx)
-                              .map((item, i) => ({
-                                ...item,
-                                index: String(i + 1).padStart(2, '0'),
-                              }));
-                            persistStorefrontDraft({ ...sf, heroSlides: filtered });
-                          }}
-                          className="inline-flex items-center gap-1 text-[11px] text-red-700 hover:underline cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          <span>Remover Slide</span>
-                        </button>
-                      )}
-                    </div>
+            return (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start pt-2 border-t border-black/8">
+                <div className="lg:col-span-5 bg-white rounded-[24px] p-6 border border-black/5 space-y-4">
+                  <div>
+                    <h3 className="text-base font-semibold text-[#1C1C1E]">
+                      Banner Inferior (Após os Produtos)
+                    </h3>
+                    <p className="text-[11px] text-[#72726E] mt-0.5">
+                      Aparece logo onde termina a secção de produtos, com o mesmo estilo escuro do banner principal. Começa vazio para adicionar as suas imagens.
+                    </p>
                   </div>
 
                   <div>
                     <label className="block text-xs font-medium text-[#555552] mb-1">
-                      Descrição / Alt da Imagem
+                      Título do Banner Inferior
                     </label>
                     <input
                       type="text"
-                      value={slide.caption}
-                      onChange={(e) => {
-                        const next = [...sf.heroSlides];
-                        next[idx] = { ...next[idx], caption: e.target.value };
-                        updateSfDraft({ ...sf, heroSlides: next });
-                      }}
-                      className="w-full bg-white border border-black/15 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#1C1C1E]"
+                      value={bottom.title}
+                      onChange={(e) => updateBottom({ title: e.target.value })}
+                      placeholder="Ex: Curadoria da Estação"
+                      className="w-full border border-black/15 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:border-[#1C1C1E]"
                     />
                   </div>
 
-                  <ImageField
-                    label="Fotografia do Banner"
-                    recommendedSize="900 × 1050 px (vertical 4:5 · mín. 700 × 820 px)"
-                    value={slide.image}
-                    allowEmpty
-                    uploadFolder="banners"
-                    onChange={(url) => {
-                      const next = [...sf.heroSlides];
-                      next[idx] = { ...next[idx], image: url };
-                      const nextSf = { ...sf, heroSlides: next };
-                      const shouldAutoSave =
-                        url === '' ||
-                        url.startsWith('data:image/') ||
-                        url.includes('/storage/v1/object/public/') ||
-                        url.startsWith('/src/assets/images/');
-                      if (shouldAutoSave) {
-                        persistStorefrontDraft(nextSf);
-                      } else {
-                        updateSfDraft(nextSf);
-                      }
-                    }}
-                  />
-                </div>
-              ))}
-            </div>
+                  <div>
+                    <label className="block text-xs font-medium text-[#555552] mb-1">
+                      Subtítulo Curto
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={bottom.subtitle}
+                      onChange={(e) => updateBottom({ subtitle: e.target.value })}
+                      className="w-full border border-black/15 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:border-[#1C1C1E]"
+                    />
+                  </div>
 
-            <div className="pt-2 flex flex-wrap items-center justify-end gap-3 border-t border-black/6">
-              {savedNotice && (
-                <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
-                  <Check className="w-4 h-4" />
-                  <span>Banner guardado permanentemente</span>
-                </span>
-              )}
-              {saveError && <span className="text-xs text-red-700">{saveError}</span>}
-              <button
-                type="button"
-                disabled={saving}
-                onClick={() => handleSaveAll()}
-                className="px-5 py-2.5 bg-[#1C1C1E] text-white text-xs font-medium rounded-full hover:bg-[#323235] disabled:opacity-60 cursor-pointer whitespace-nowrap shrink-0"
-              >
-                {saving ? 'A guardar...' : 'Guardar Banner'}
-              </button>
-            </div>
-          </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-[#555552] mb-1">
+                        Texto do Botão Branco
+                      </label>
+                      <input
+                        type="text"
+                        value={bottom.ctaText}
+                        onChange={(e) => updateBottom({ ctaText: e.target.value })}
+                        placeholder="Ex: Ver Coleção"
+                        className="w-full border border-black/15 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:border-[#1C1C1E]"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-[#555552] mb-1">
+                        Categoria de Destino
+                      </label>
+                      <select
+                        value={bottom.targetCategory || 'Todos'}
+                        onChange={(e) =>
+                          updateBottom({ targetCategory: e.target.value as typeof bottom.targetCategory })
+                        }
+                        className="w-full border border-black/15 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#1C1C1E]"
+                      >
+                        {(['Todos', 'Mulher', 'Homem', 'Vestidos', 'Tops', 'Calçado', 'Malas', 'Acessórios', 'Saldos'] as const).map(
+                          (cat) => (
+                            <option key={cat} value={cat}>
+                              {cat}
+                            </option>
+                          )
+                        )}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="lg:col-span-7 bg-white rounded-[24px] p-6 border border-black/5 space-y-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-base font-semibold text-[#1C1C1E]">
+                        Imagens do Banner Inferior ({bottom.slides.length})
+                      </h3>
+                      <p className="text-[11px] text-[#72726E] mt-0.5">
+                        Adicione até 3+ fotografias. Quando vazio, o banner exibe apenas o cartão escuro limpo; ao carregar fotos, aparece o destaque à direita.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextNum = String(bottom.slides.length + 1).padStart(2, '0');
+                        updateBottom({
+                          slides: [
+                            ...bottom.slides,
+                            {
+                              index: nextNum,
+                              image: '',
+                              caption: `Banner Inferior ${nextNum}`,
+                            },
+                          ],
+                        });
+                      }}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-[#1C1C1E] text-white text-xs font-medium cursor-pointer shrink-0"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Adicionar Slide</span>
+                    </button>
+                  </div>
+
+                  <div className="space-y-4">
+                    {bottom.slides.map((slide, idx) => (
+                      <div key={idx} className="p-4 rounded-2xl bg-[#F6F6F4] space-y-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-mono font-semibold text-[#1C1C1E]">
+                            Slide {String(idx + 1).padStart(2, '0')}
+                          </span>
+                          <div className="flex items-center gap-3">
+                            {slide.image?.trim() && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const next = [...bottom.slides];
+                                  next[idx] = { ...next[idx], image: '' };
+                                  persistStorefrontDraft({
+                                    ...sf,
+                                    bottomBanner: { ...bottom, slides: next },
+                                  });
+                                }}
+                                className="inline-flex items-center gap-1 text-[11px] text-[#555552] hover:text-[#1C1C1E] hover:underline cursor-pointer"
+                              >
+                                <span>Remover Imagem</span>
+                              </button>
+                            )}
+                            {bottom.slides.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const filtered = bottom.slides
+                                    .filter((_, i) => i !== idx)
+                                    .map((item, i) => ({
+                                      ...item,
+                                      index: String(i + 1).padStart(2, '0'),
+                                    }));
+                                  persistStorefrontDraft({
+                                    ...sf,
+                                    bottomBanner: { ...bottom, slides: filtered },
+                                  });
+                                }}
+                                className="inline-flex items-center gap-1 text-[11px] text-red-700 hover:underline cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span>Remover Slide</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-medium text-[#555552] mb-1">
+                            Descrição / Alt da Imagem
+                          </label>
+                          <input
+                            type="text"
+                            value={slide.caption}
+                            onChange={(e) => {
+                              const next = [...bottom.slides];
+                              next[idx] = { ...next[idx], caption: e.target.value };
+                              updateBottom({ slides: next });
+                            }}
+                            className="w-full bg-white border border-black/15 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#1C1C1E]"
+                          />
+                        </div>
+
+                        <ImageField
+                          label="Fotografia do Banner Inferior"
+                          recommendedSize="900 × 1050 px (vertical 4:5 · mín. 700 × 820 px)"
+                          value={slide.image}
+                          allowEmpty
+                          uploadFolder="banners"
+                          onChange={(url) => {
+                            const next = [...bottom.slides];
+                            next[idx] = { ...next[idx], image: url };
+                            const nextSf: StorefrontConfig = {
+                              ...sf,
+                              bottomBanner: { ...bottom, slides: next },
+                            };
+                            const shouldAutoSave =
+                              url === '' ||
+                              url.startsWith('data:image/') ||
+                              url.includes('/storage/v1/object/public/') ||
+                              url.startsWith('/src/assets/images/');
+                            if (shouldAutoSave) {
+                              persistStorefrontDraft(nextSf);
+                            } else {
+                              updateSfDraft(nextSf);
+                            }
+                          }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="pt-2 flex flex-wrap items-center justify-end gap-3 border-t border-black/6">
+                    {savedNotice && (
+                      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+                        <Check className="w-4 h-4" />
+                        <span>Banner inferior guardado permanentemente</span>
+                      </span>
+                    )}
+                    {saveError && <span className="text-xs text-red-700">{saveError}</span>}
+                    <button
+                      type="button"
+                      disabled={saving}
+                      onClick={() => handleSaveAll()}
+                      className="px-5 py-2.5 bg-[#1C1C1E] text-white text-xs font-medium rounded-full hover:bg-[#323235] disabled:opacity-60 cursor-pointer whitespace-nowrap shrink-0"
+                    >
+                      {saving ? 'A guardar...' : 'Guardar Banner Inferior'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 

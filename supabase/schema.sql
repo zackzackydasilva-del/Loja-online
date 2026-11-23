@@ -140,6 +140,42 @@ create table if not exists public.store_costs (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.store_presence (
+  session_id text primary key,
+  visitor_label text not null,
+  stage text not null default 'loja',
+  product_id text,
+  product_name text,
+  cart_count integer not null default 0,
+  cart_total numeric(12, 2) not null default 0,
+  cart_items_summary jsonb not null default '[]'::jsonb,
+  customer_name text,
+  customer_email text,
+  city text,
+  device text not null default 'Web',
+  started_at timestamptz not null default now(),
+  last_seen_at timestamptz not null default now(),
+  completed_order_id text
+);
+
+create table if not exists public.store_analytics_events (
+  id text primary key,
+  session_id text not null,
+  visitor_label text not null,
+  event_type text not null,
+  product_id text,
+  product_name text,
+  order_id text,
+  customer_name text,
+  customer_email text,
+  city text,
+  cart_count integer not null default 0,
+  cart_total numeric(12, 2) not null default 0,
+  details text,
+  device text,
+  created_at timestamptz not null default now()
+);
+
 -- Índices para consultas rápidas entre loja e painel de gestão
 create index if not exists idx_products_category on public.products(category);
 create index if not exists idx_orders_customer_id on public.orders(customer_id);
@@ -149,6 +185,9 @@ create index if not exists idx_order_items_product_id on public.order_items(prod
 create index if not exists idx_stock_movements_product_id on public.stock_movements(product_id);
 create index if not exists idx_tasks_order_id on public.tasks(order_id);
 create index if not exists idx_store_costs_date on public.store_costs(cost_date);
+create index if not exists idx_store_presence_last_seen on public.store_presence(last_seen_at desc);
+create index if not exists idx_store_analytics_events_created on public.store_analytics_events(created_at desc);
+create index if not exists idx_store_analytics_events_type on public.store_analytics_events(event_type);
 
 -- Row Level Security desativado para garantir que todos os visitantes vejam exatamente os mesmos produtos e definições
 alter table public.categories disable row level security;
@@ -164,6 +203,8 @@ alter table public.weekly_sales disable row level security;
 alter table public.store_settings disable row level security;
 alter table public.newsletter_subscribers disable row level security;
 alter table public.store_costs disable row level security;
+alter table public.store_presence disable row level security;
+alter table public.store_analytics_events disable row level security;
 
 grant usage on schema public to anon, authenticated, service_role;
 grant all on all tables in schema public to anon, authenticated, service_role;

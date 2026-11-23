@@ -11,6 +11,7 @@ import {
 import { useStore } from '../../context/StoreContext';
 import { ProductColorVariant } from '../../types/store';
 import { formatMoney } from '../../utils/currency';
+import { reportVisitorStage } from '../../utils/storeTracker';
 import { SafeImage } from '../SafeImage';
 
 export const ProductDetailModal: React.FC = () => {
@@ -21,6 +22,8 @@ export const ProductDetailModal: React.FC = () => {
     wishlist,
     toggleWishlist,
     settings,
+    cart,
+    products,
   } = useStore();
 
   const [selectedSize, setSelectedSize] = useState<string>('M');
@@ -64,6 +67,17 @@ export const ProductDetailModal: React.FC = () => {
       setActiveColorIdx(0);
       setShowSizeGuide(false);
       setCopiedShare(false);
+
+      const cartCount = cart.reduce((s, i) => s + i.quantity, 0);
+      const priceMap = new Map(products.map((p) => [p.id, p.price]));
+      const cartTotal = cart.reduce((s, i) => s + (priceMap.get(i.productId) || 0) * i.quantity, 0);
+      reportVisitorStage({
+        stage: 'produto',
+        productId: quickViewProduct.id,
+        productName: quickViewProduct.name,
+        cartCount,
+        cartTotal,
+      });
     }
   }, [quickViewProduct]);
 
@@ -113,15 +127,15 @@ export const ProductDetailModal: React.FC = () => {
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/55 backdrop-blur-xs flex items-end sm:items-center justify-center sm:p-4 font-sans"
+      className="fixed inset-0 z-50 bg-black/55 backdrop-blur-xs flex items-end sm:items-center justify-center sm:p-4 md:p-6 font-sans"
       onClick={() => setQuickViewProduct(null)}
     >
       <div
-        className="relative w-full sm:max-w-[450px] bg-white rounded-t-[32px] sm:rounded-[32px] overflow-hidden shadow-2xl max-h-[94vh] overflow-y-auto"
+        className="relative w-full sm:max-w-[450px] md:max-w-[820px] lg:max-w-[900px] bg-white rounded-t-[32px] sm:rounded-[32px] overflow-hidden shadow-2xl max-h-[94vh] md:max-h-[88vh] overflow-y-auto md:overflow-hidden md:grid md:grid-cols-12"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Top Product Gallery Canvas */}
-        <div className="relative bg-[#F6F6F6] h-[340px] sm:h-[385px] flex items-center justify-center overflow-hidden">
+        {/* Top / Left Product Gallery Canvas */}
+        <div className="md:col-span-6 relative bg-[#F6F6F6] h-[340px] sm:h-[385px] md:h-auto md:min-h-[520px] lg:min-h-[560px] flex items-center justify-center overflow-hidden">
           {/* Top-Left Back Button */}
           <button
             type="button"
@@ -189,8 +203,8 @@ export const ProductDetailModal: React.FC = () => {
           </div>
         </div>
 
-        {/* Overlapping Rounded White Product Details Sheet */}
-        <div className="relative z-20 -mt-6 bg-white rounded-t-[28px] px-6 pt-6 pb-7">
+        {/* Overlapping Rounded White Product Details Sheet (Right Column on PC) */}
+        <div className="md:col-span-6 relative z-20 -mt-6 md:mt-0 bg-white rounded-t-[28px] md:rounded-none px-6 pt-6 pb-7 md:p-8 lg:p-9 md:overflow-y-auto md:max-h-[88vh] md:flex md:flex-col md:justify-between">
           {/* Top Highlight Badges */}
           <div className="flex flex-wrap items-center gap-2 mb-3.5">
             {(quickViewProduct.isNew || !hasDiscount) && (
