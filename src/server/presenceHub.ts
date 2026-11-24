@@ -48,13 +48,13 @@ let sweeperStarted = false;
 function rememberEvent(evt: StoreAnalyticsEvent): boolean {
   if (seenEventIds.has(evt.id)) return false;
   seenEventIds.add(evt.id);
-  if (seenEventIds.size > 1500) {
+  if (seenEventIds.size > 3000) {
     const oldest = seenEventIds.values().next().value;
     if (oldest) seenEventIds.delete(oldest);
   }
   recentEvents.unshift(evt);
-  if (recentEvents.length > 300) {
-    recentEvents.length = 300;
+  if (recentEvents.length > 1500) {
+    recentEvents.length = 1500;
   }
   return true;
 }
@@ -317,13 +317,41 @@ function pruneStaleSessions() {
   }
 }
 
+export async function recordCheckoutDraftAnalyticsAsync(order: StoreOrder, sessionId?: string) {
+  const sid = sanitizeText(sessionId, 80) || `order-${order.id}`;
+  const nowIso = new Date().toISOString();
+  const totalQty = order.items.reduce((s, i) => s + i.quantity, 0);
+  const summary = order.items.map((i) => `${i.quantity}x ${i.name}`);
+
+  const draftEvt: StoreAnalyticsEvent = {
+    id: `evt-checkout-draft-${order.id}`,
+    sessionId: sid,
+    visitorLabel: order.customerName,
+    eventType: 'checkout',
+    orderId: order.id,
+    customerName: order.customerName,
+    customerEmail: order.customerEmail,
+    city: order.city,
+    cartCount: totalQty,
+    cartTotal: order.total,
+    details: `Preencheu check-out · Pendente #${order.id} (${summary.slice(0, 3).join(', ')})`,
+    device: 'Loja Online',
+    createdAt: nowIso,
+  };
+
+  if (rememberEvent(draftEvt)) {
+    broadcastToAdmins({ type: 'analytics:event', payload: draftEvt });
+    await recordAnalyticsEventInStore(draftEvt);
+  }
+}
+
 export async function getAuthoritativeRealtimeSnapshot(): Promise<{
   sessions: LiveVisitorSession[];
   events: StoreAnalyticsEvent[];
   serverTime: string;
 }> {
   pruneStaleSessions();
-  const persisted = await getPersistedRealtimeSnapshot(300).catch(() => ({
+  const persisted = await getPersistedRealtimeSnapshot(2000).catch(() => ({
     sessions: [] as LiveVisitorSession[],
     events: [] as StoreAnalyticsEvent[],
   }));
@@ -349,7 +377,7 @@ export async function getAuthoritativeRealtimeSnapshot(): Promise<{
   );
   const events = Array.from(eventMap.values())
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    .slice(0, 300);
+    .slice(0, 2000);
 
   return {
     sessions,

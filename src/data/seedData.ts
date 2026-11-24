@@ -129,6 +129,7 @@ export const DEFAULT_STOREFRONT_CONFIG: StorefrontConfig = {
       { index: '03', image: '', caption: 'Banner Inferior 03' },
     ],
   },
+  highlights: [],
   catalogEyebrow: 'Catálogo',
   catalogTitle: 'As Nossas Escolhas Favoritas',
   guarantees: [

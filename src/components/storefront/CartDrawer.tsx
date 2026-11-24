@@ -1,10 +1,29 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, CheckCircle2, Minus, Plus, ShoppingBag, Trash2, X } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import { PaymentMethod, StoreOrder } from '../../types/store';
 import { formatMoney } from '../../utils/currency';
-import { reportVisitorStage } from '../../utils/storeTracker';
+import { getVisitorSessionId, reportVisitorStage } from '../../utils/storeTracker';
 import { SafeImage } from '../SafeImage';
+
+const DRAFT_ORDER_STORAGE_KEY = 'lunora_checkout_draft_id_v1';
+
+function readStoredDraftId(): string {
+  try {
+    return sessionStorage.getItem(DRAFT_ORDER_STORAGE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function saveStoredDraftId(id: string) {
+  try {
+    if (id) sessionStorage.setItem(DRAFT_ORDER_STORAGE_KEY, id);
+    else sessionStorage.removeItem(DRAFT_ORDER_STORAGE_KEY);
+  } catch {
+    // Ignore storage error
+  }
+}
 
 export const CartDrawer: React.FC = () => {
   const {
@@ -37,6 +56,10 @@ export const CartDrawer: React.FC = () => {
 
   const [checkoutError, setCheckoutError] = useState('');
   const [submittingOrder, setSubmittingOrder] = useState(false);
+  const [draftOrderId, setDraftOrderId] = useState<string>(() => readStoredDraftId());
+  const draftOrderIdRef = useRef<string>(draftOrderId);
+  draftOrderIdRef.current = draftOrderId;
+  const lastSavedPayloadRef = useRef<string>('');
 
   const activePromoCode = (settings.storefrontConfig.newsletter.promoCode || 'LUNORA10').trim().toUpperCase();
 
@@ -104,6 +127,87 @@ export const CartDrawer: React.FC = () => {
     confirmedOrder,
   ]);
 
+  useEffect(() => {
+    if (!isCartOpen || step !== 'checkout' || cartLines.length === 0) return;
+
+    const name = form.customerName.trim();
+    const phone = form.customerPhone.trim();
+    const address = form.shippingAddress.trim();
+    const city = form.city.trim();
+
+    if (name.length < 2 || phone.length < 6 || address.length < 3 || city.length < 2) {
+      return;
+    }
+
+    const itemsPayload = cartLines.map((i) => ({
+      productId: i.product.id,
+      size: i.size,
+      quantity: i.quantity,
+    }));
+
+    const signature = JSON.stringify({
+      name,
+      email: form.customerEmail.trim(),
+      phone,
+      address,
+      city,
+      postalCode: form.postalCode.trim(),
+      paymentMethod: form.paymentMethod,
+      discountApplied,
+      itemsPayload,
+    });
+
+    if (lastSavedPayloadRef.current === signature) {
+      return;
+    }
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await fetch('/api/orders/draft', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            draftOrderId: draftOrderIdRef.current || undefined,
+            customerName: name,
+            customerEmail: form.customerEmail.trim(),
+            customerPhone: phone,
+            shippingAddress: address,
+            city,
+            postalCode: form.postalCode.trim(),
+            paymentMethod: form.paymentMethod,
+            items: itemsPayload,
+            discountApplied,
+            sessionId: getVisitorSessionId(),
+          }),
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as { ok?: boolean; order?: StoreOrder };
+        if (data.order?.id) {
+          lastSavedPayloadRef.current = signature;
+          draftOrderIdRef.current = data.order.id;
+          setDraftOrderId(data.order.id);
+          saveStoredDraftId(data.order.id);
+        }
+      } catch {
+        // Silent background draft save
+      }
+    }, 900);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    isCartOpen,
+    step,
+    cartLines,
+    form.customerName,
+    form.customerEmail,
+    form.customerPhone,
+    form.shippingAddress,
+    form.city,
+    form.postalCode,
+    form.paymentMethod,
+    discountApplied,
+  ]);
+
   if (!isCartOpen) return null;
 
   const handleApplyPromo = (e: React.FormEvent) => {
@@ -123,8 +227,13 @@ export const CartDrawer: React.FC = () => {
     try {
       const order = await placeOrder({
         ...form,
+        draftOrderId: draftOrderIdRef.current || undefined,
         discountApplied,
       });
+      draftOrderIdRef.current = '';
+      lastSavedPayloadRef.current = '';
+      setDraftOrderId('');
+      saveStoredDraftId('');
       setConfirmedOrder(order);
       setStep('confirmed');
     } catch (err) {
@@ -456,6 +565,11 @@ export const CartDrawer: React.FC = () => {
                   ))}
                 </div>
               </div>
+              {draftOrderId && (
+                <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-2 rounded-lg">
+                  Pré-registo guardado automaticamente como encomenda pendente (#{draftOrderId}).
+                </p>
+              )}
               {checkoutError && (
                 <p className="text-xs text-red-700 bg-red-50 px-3 py-2 rounded-lg">
                   {checkoutError}

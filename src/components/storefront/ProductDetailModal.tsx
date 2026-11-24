@@ -477,14 +477,75 @@ export const ProductDetailModal: React.FC = () => {
                 })}
               </div>
 
+              {(() => {
+                const measurements = Array.isArray(quickViewProduct.sizeMeasurements)
+                  ? quickViewProduct.sizeMeasurements
+                  : [];
+                const activeMeasurement =
+                  measurements.find(
+                    (m) => m.size.toLowerCase() === selectedSize.toLowerCase()
+                  ) || null;
+                if (!activeMeasurement) return null;
+                return (
+                  <div className="mt-3 rounded-2xl bg-[#F5F5F5] px-3.5 py-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-[#333333]">
+                    <span className="font-semibold text-[#111111]">
+                      Medidas Tam. {activeMeasurement.size}:
+                    </span>
+                    {activeMeasurement.width && (
+                      <span>
+                        Largura: <strong className="font-mono text-[#111111]">{activeMeasurement.width} cm</strong>
+                      </span>
+                    )}
+                    {activeMeasurement.height && (
+                      <span>
+                        Altura: <strong className="font-mono text-[#111111]">{activeMeasurement.height} cm</strong>
+                      </span>
+                    )}
+                    {activeMeasurement.waist && (
+                      <span>
+                        Cintura: <strong className="font-mono text-[#111111]">{activeMeasurement.waist} cm</strong>
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
+
               {showSizeGuide && (
-                <div className="mt-3 rounded-2xl bg-[#F5F5F5] p-3.5 text-[11px] text-[#444444] space-y-1.5">
+                <div className="mt-3 rounded-2xl bg-[#F5F5F5] p-3.5 text-[11px] text-[#444444] space-y-2">
                   <p className="font-semibold text-[#111111]">
-                    Medidas & Referência ({quickViewProduct.sku})
+                    Guia de Tamanhos & Medidas ({quickViewProduct.sku})
                   </p>
-                  <p className="font-mono text-[10px] text-[#666666]">
-                    S (88–94 cm) · M (95–100 cm) · L (101–107 cm) · XL (108–114 cm)
-                  </p>
+                  {quickViewProduct.sizeMeasurements &&
+                  quickViewProduct.sizeMeasurements.length > 0 ? (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse text-[11px]">
+                        <thead>
+                          <tr className="border-b border-black/10 text-[#666666]">
+                            <th className="py-1 pr-3 font-semibold">Tam.</th>
+                            <th className="py-1 pr-3 font-semibold">Largura</th>
+                            <th className="py-1 pr-3 font-semibold">Altura</th>
+                            <th className="py-1 font-semibold">Cintura</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-black/6 font-mono text-[11px]">
+                          {quickViewProduct.sizeMeasurements.map((m) => (
+                            <tr key={m.size}>
+                              <td className="py-1.5 pr-3 font-sans font-semibold text-[#111111]">
+                                {m.size}
+                              </td>
+                              <td className="py-1.5 pr-3">{m.width ? `${m.width} cm` : '—'}</td>
+                              <td className="py-1.5 pr-3">{m.height ? `${m.height} cm` : '—'}</td>
+                              <td className="py-1.5">{m.waist ? `${m.waist} cm` : '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <p className="font-mono text-[10px] text-[#666666]">
+                      S (88–94 cm) · M (95–100 cm) · L (101–107 cm) · XL (108–114 cm)
+                    </p>
+                  )}
                 </div>
               )}
             </div>

@@ -83,6 +83,7 @@ declare global {
 }
 
 interface CheckoutPayload {
+  draftOrderId?: string;
   customerName: string;
   customerEmail: string;
   customerPhone: string;

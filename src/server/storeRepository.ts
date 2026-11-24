@@ -14,6 +14,7 @@ import type {
   Product,
   ProductCategory,
   ProductColorVariant,
+  ProductSizeMeasurement,
   StockMovement,
   StoreAnalyticsEvent,
   StoreCampaign,
@@ -105,6 +106,7 @@ function mergeStorefrontConfig(raw: unknown): StorefrontConfig {
           ? obj.bottomBanner.slides
           : DEFAULT_STOREFRONT_CONFIG.bottomBanner!.slides,
     },
+    highlights: Array.isArray(obj.highlights) ? obj.highlights : [],
     guarantees:
       Array.isArray(obj.guarantees) && obj.guarantees.length > 0
         ? obj.guarantees
@@ -150,6 +152,7 @@ function mergeStorefrontConfigPatch(
               : baseBottom.slides,
         }
       : baseBottom,
+    highlights: Array.isArray(patch.highlights) ? patch.highlights : base.highlights || [],
     newsletter: {
       ...base.newsletter,
       ...(patch.newsletter || {}),
@@ -171,9 +174,14 @@ function mergeStorefrontConfigPatch(
 
 const STOREFRONT_CONFIG_META_ID = '__lunora_storefront_config__';
 const STORE_COSTS_META_ID = '__lunora_store_costs__';
+const STORE_ANALYTICS_META_ID = '__lunora_analytics_events__';
 
 function isMetaIntegrationId(id: unknown): boolean {
-  return id === STOREFRONT_CONFIG_META_ID || id === STORE_COSTS_META_ID;
+  return (
+    id === STOREFRONT_CONFIG_META_ID ||
+    id === STORE_COSTS_META_ID ||
+    id === STORE_ANALYTICS_META_ID
+  );
 }
 
 function isMissingStorefrontColError(err: { code?: string; message?: string } | null | undefined): boolean {
@@ -200,17 +208,44 @@ function normalizeEmbeddedCost(item: unknown): StoreCost | null {
   };
 }
 
+function normalizeEmbeddedAnalyticsEvent(item: unknown): StoreAnalyticsEvent | null {
+  if (!item || typeof item !== 'object') return null;
+  const rec = item as Record<string, unknown>;
+  const id = String(rec.id || '').trim();
+  const sessionId = String(rec.sessionId || '').trim();
+  if (!id || !sessionId) return null;
+  return {
+    id,
+    sessionId,
+    visitorLabel: String(rec.visitorLabel || 'Visitante'),
+    eventType: String(rec.eventType || 'loja') as StoreAnalyticsEvent['eventType'],
+    productId: rec.productId ? String(rec.productId) : undefined,
+    productName: rec.productName ? String(rec.productName) : undefined,
+    orderId: rec.orderId ? String(rec.orderId) : undefined,
+    customerName: rec.customerName ? String(rec.customerName) : undefined,
+    customerEmail: rec.customerEmail ? String(rec.customerEmail) : undefined,
+    city: rec.city ? String(rec.city) : undefined,
+    cartCount: Number(rec.cartCount ?? 0),
+    cartTotal: Number(rec.cartTotal ?? 0),
+    details: rec.details ? String(rec.details) : undefined,
+    device: rec.device ? String(rec.device) : undefined,
+    createdAt: String(rec.createdAt || new Date().toISOString()),
+  };
+}
+
 function extractIntegrationsAndConfig(rawIntegrations: unknown): {
   integrations: StoreSettings['integrations'];
   embeddedConfig: Partial<StorefrontConfig> | null;
   embeddedCosts: StoreCost[];
+  embeddedEvents: StoreAnalyticsEvent[];
 } {
   if (!Array.isArray(rawIntegrations)) {
-    return { integrations: [], embeddedConfig: null, embeddedCosts: [] };
+    return { integrations: [], embeddedConfig: null, embeddedCosts: [], embeddedEvents: [] };
   }
   const integrations: StoreSettings['integrations'] = [];
   let embeddedConfig: Partial<StorefrontConfig> | null = null;
   let embeddedCosts: StoreCost[] = [];
+  let embeddedEvents: StoreAnalyticsEvent[] = [];
   for (const item of rawIntegrations) {
     if (item && typeof item === 'object') {
       const rec = item as Record<string, unknown>;
@@ -228,16 +263,25 @@ function extractIntegrationsAndConfig(rawIntegrations: unknown): {
         }
         continue;
       }
+      if (rec.id === STORE_ANALYTICS_META_ID) {
+        if (Array.isArray(rec.events)) {
+          embeddedEvents = rec.events
+            .map(normalizeEmbeddedAnalyticsEvent)
+            .filter((e): e is StoreAnalyticsEvent => e !== null);
+        }
+        continue;
+      }
       integrations.push(item as StoreSettings['integrations'][number]);
     }
   }
-  return { integrations, embeddedConfig, embeddedCosts };
+  return { integrations, embeddedConfig, embeddedCosts, embeddedEvents };
 }
 
 function packIntegrationsWithConfig(
   visibleIntegrations: StoreSettings['integrations'],
   config: StorefrontConfig | null,
-  costs: StoreCost[] = []
+  costs: StoreCost[] = [],
+  events: StoreAnalyticsEvent[] = []
 ): unknown[] {
   const clean = visibleIntegrations.filter((i) => i && !isMetaIntegrationId(i.id));
   const packed: unknown[] = [...clean];
@@ -257,6 +301,15 @@ function packIntegrationsWithConfig(
       role: 'system',
       connected: false,
       costs: costs.slice(0, 500),
+    });
+  }
+  if (events.length > 0) {
+    packed.push({
+      id: STORE_ANALYTICS_META_ID,
+      name: 'store_analytics_events',
+      role: 'system',
+      connected: false,
+      events: events.slice(0, 400),
     });
   }
   return packed;
@@ -559,23 +612,53 @@ export async function checkSupabaseTablesStatus(): Promise<{
   };
 }
 
+function sanitizeSizeMeasurements(raw: unknown): ProductSizeMeasurement[] {
+  if (!Array.isArray(raw)) return [];
+  const clean: ProductSizeMeasurement[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const obj = item as Record<string, unknown>;
+    const size = String(obj.size ?? '').trim().slice(0, 24);
+    const width = String(obj.width ?? '').trim().slice(0, 24);
+    const height = String(obj.height ?? '').trim().slice(0, 24);
+    const waist = String(obj.waist ?? '').trim().slice(0, 24);
+    if (size && (width || height || waist)) {
+      clean.push({
+        size,
+        ...(width ? { width } : {}),
+        ...(height ? { height } : {}),
+        ...(waist ? { waist } : {}),
+      });
+    }
+  }
+  return clean;
+}
+
 function parseProductColors(raw: unknown): {
   colors: string[];
   colorVariants: ProductColorVariant[];
+  sizeMeasurements: ProductSizeMeasurement[];
 } {
   if (!Array.isArray(raw) || raw.length === 0) {
-    return { colors: ['Neutro'], colorVariants: [] };
+    return { colors: ['Neutro'], colorVariants: [], sizeMeasurements: [] };
   }
   const variants: ProductColorVariant[] = [];
   const names: string[] = [];
+  let sizeMeasurements: ProductSizeMeasurement[] = [];
   for (const item of raw) {
-    if (item && typeof item === 'object' && 'image' in item && 'name' in item) {
-      const obj = item as { name?: unknown; image?: unknown };
-      const name = String(obj.name ?? '').trim();
-      const image = String(obj.image ?? '').trim();
-      if (name && image) {
-        variants.push({ name, image });
-        names.push(name);
+    if (item && typeof item === 'object') {
+      const rec = item as Record<string, unknown>;
+      if (rec.__type === 'measurements') {
+        sizeMeasurements = sanitizeSizeMeasurements(rec.items);
+        continue;
+      }
+      if ('image' in item && 'name' in item) {
+        const name = String(rec.name ?? '').trim();
+        const image = String(rec.image ?? '').trim();
+        if (name && image) {
+          variants.push({ name, image });
+          names.push(name);
+        }
       }
     } else if (typeof item === 'string' && item.trim()) {
       names.push(item.trim());
@@ -584,11 +667,30 @@ function parseProductColors(raw: unknown): {
   return {
     colors: names.length > 0 ? names : ['Neutro'],
     colorVariants: variants,
+    sizeMeasurements,
   };
 }
 
+function serializeProductColorsPayload(
+  colors: string[],
+  colorVariants?: ProductColorVariant[],
+  sizeMeasurements?: ProductSizeMeasurement[]
+): unknown[] {
+  const base: unknown[] =
+    colorVariants && colorVariants.length > 0
+      ? [...colorVariants]
+      : colors.length > 0
+      ? [...colors]
+      : ['Neutro'];
+  const cleanMeasurements = sanitizeSizeMeasurements(sizeMeasurements);
+  if (cleanMeasurements.length > 0) {
+    base.push({ __type: 'measurements', items: cleanMeasurements });
+  }
+  return base;
+}
+
 function mapProductFromRow(row: Record<string, unknown>): Product {
-  const { colors, colorVariants } = parseProductColors(row.colors);
+  const { colors, colorVariants, sizeMeasurements } = parseProductColors(row.colors);
   return {
     id: String(row.id),
     sku: String(row.sku),
@@ -600,6 +702,7 @@ function mapProductFromRow(row: Record<string, unknown>): Product {
     reviewCount: Number(row.review_count ?? 1),
     stock: Number(row.stock ?? 0),
     sizes: Array.isArray(row.sizes) ? (row.sizes as string[]) : ['Único'],
+    sizeMeasurements,
     colors,
     colorVariants,
     description: String(row.description ?? ''),
@@ -612,8 +715,11 @@ function mapProductFromRow(row: Record<string, unknown>): Product {
 }
 
 function mapProductToRow(p: Product) {
-  const serializedColors =
-    p.colorVariants && p.colorVariants.length > 0 ? p.colorVariants : p.colors;
+  const serializedColors = serializeProductColorsPayload(
+    p.colors,
+    p.colorVariants,
+    p.sizeMeasurements
+  );
   return {
     id: p.id,
     sku: p.sku,
@@ -1239,7 +1345,373 @@ export async function getAdminBundle() {
   };
 }
 
+export async function upsertCheckoutPendingOrderInStore(input: {
+  draftOrderId?: string;
+  customerName: string;
+  customerEmail: string;
+  customerPhone: string;
+  shippingAddress: string;
+  city: string;
+  postalCode: string;
+  paymentMethod: PaymentMethod;
+  items: { productId: string; size: string; quantity: number }[];
+  discountApplied: boolean;
+  strictStock?: boolean;
+}): Promise<StoreOrder> {
+  const publicData = await getPublicStoreData();
+  const productMap = new Map(publicData.products.map((p) => [p.id, p]));
+
+  const verifiedItems: OrderItemSummary[] = [];
+  for (const line of input.items) {
+    const prod = productMap.get(line.productId);
+    const qty = Math.max(1, Math.floor(Number(line.quantity) || 1));
+    if (!prod) {
+      throw new Error('Produto não encontrado no catálogo.');
+    }
+    verifiedItems.push({
+      productId: prod.id,
+      name: prod.name,
+      size: String(line.size || prod.sizes[0] || 'Único').slice(0, 20),
+      quantity: qty,
+      unitPrice: prod.price,
+    });
+  }
+
+  if (verifiedItems.length === 0) {
+    throw new Error('O saco de compras está vazio.');
+  }
+
+  const subtotal = verifiedItems.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
+  const total = input.discountApplied ? +(subtotal * 0.9).toFixed(2) : +subtotal.toFixed(2);
+  const requestedDraftId = typeof input.draftOrderId === 'string' ? input.draftOrderId.trim() : '';
+
+  const rawEmail = input.customerEmail.trim().toLowerCase();
+  const safeCustomerName = input.customerName.trim() || 'Cliente Checkout';
+  const safePhone = input.customerPhone.trim() || '—';
+  const safeAddress = input.shippingAddress.trim() || 'Em preenchimento';
+  const safeCity = input.city.trim() || 'Luanda';
+  const safePostal = input.postalCode.trim() || '—';
+
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    await ensureSupabaseSeeded(supabase).catch(() => false);
+
+    let existingOrderRow: Record<string, unknown> | null = null;
+    if (requestedDraftId) {
+      const { data } = await supabase
+        .from('orders')
+        .select('*')
+        .eq('id', requestedDraftId)
+        .maybeSingle();
+      if (data && String(data.status) === 'Pendente') {
+        existingOrderRow = data as Record<string, unknown>;
+      }
+    }
+
+    const orderId = existingOrderRow
+      ? String(existingOrderRow.id)
+      : `LUN-${Math.floor(2050 + (Date.now() % 7900))}`;
+    const createdAt = existingOrderRow
+      ? String(existingOrderRow.created_at)
+      : new Date().toISOString().slice(0, 10);
+
+    const normalizedEmail =
+      rawEmail && rawEmail.includes('@')
+        ? rawEmail
+        : `pendente-${orderId.toLowerCase()}@checkout.local`;
+
+    // Reconcile stock against previous draft quantities so auto-save updates never double-deduct stock
+    const oldQtyByProduct = new Map<string, number>();
+    if (existingOrderRow && Array.isArray(existingOrderRow.items)) {
+      for (const oldItem of existingOrderRow.items as OrderItemSummary[]) {
+        if (oldItem.productId) {
+          oldQtyByProduct.set(
+            oldItem.productId,
+            (oldQtyByProduct.get(oldItem.productId) || 0) + Math.max(0, Number(oldItem.quantity) || 0)
+          );
+        }
+      }
+    }
+
+    const newQtyByProduct = new Map<string, number>();
+    for (const item of verifiedItems) {
+      newQtyByProduct.set(
+        item.productId,
+        (newQtyByProduct.get(item.productId) || 0) + item.quantity
+      );
+    }
+
+    if (input.strictStock) {
+      for (const [pid, newQty] of newQtyByProduct.entries()) {
+        const prod = productMap.get(pid)!;
+        const oldQty = oldQtyByProduct.get(pid) || 0;
+        const deltaNeeded = newQty - oldQty;
+        if (deltaNeeded > 0 && prod.stock < deltaNeeded) {
+          throw new Error(`Stock insuficiente para ${prod.name}.`);
+        }
+      }
+    }
+
+    const resolvedCustomerId = existingOrderRow?.customer_id
+      ? String(existingOrderRow.customer_id)
+      : `cust-${Date.now()}`;
+
+    const { data: existingCust } = await supabase
+      .from('customers')
+      .select('id')
+      .eq('email', normalizedEmail)
+      .maybeSingle();
+
+    const finalCustomerId = existingCust?.id ? String(existingCust.id) : resolvedCustomerId;
+    await supabase.from('customers').upsert(
+      {
+        id: finalCustomerId,
+        name: safeCustomerName,
+        email: normalizedEmail,
+        phone: safePhone,
+        shipping_address: safeAddress,
+        city: safeCity,
+        postal_code: safePostal,
+      },
+      { onConflict: 'email' }
+    );
+
+    const updatedOrder: StoreOrder = {
+      id: orderId,
+      customerId: finalCustomerId,
+      customerName: safeCustomerName,
+      customerEmail: normalizedEmail,
+      customerPhone: safePhone,
+      shippingAddress: safeAddress,
+      city: safeCity,
+      postalCode: safePostal,
+      paymentMethod: input.paymentMethod,
+      items: verifiedItems,
+      total,
+      status: 'Pendente',
+      createdAt,
+      progressStep: 1,
+      totalSteps: 3,
+    };
+
+    if (existingOrderRow) {
+      const { error: updateErr } = await supabase
+        .from('orders')
+        .update({
+          customer_id: finalCustomerId,
+          customer_name: updatedOrder.customerName,
+          customer_email: updatedOrder.customerEmail,
+          customer_phone: updatedOrder.customerPhone,
+          shipping_address: updatedOrder.shippingAddress,
+          city: updatedOrder.city,
+          postal_code: updatedOrder.postalCode,
+          payment_method: updatedOrder.paymentMethod,
+          items: updatedOrder.items,
+          total: updatedOrder.total,
+        })
+        .eq('id', orderId);
+      if (updateErr) throw new Error('Falha ao atualizar encomenda pendente.');
+
+      await supabase.from('order_items').delete().eq('order_id', orderId);
+      await supabase.from('order_items').insert(
+        verifiedItems.map((item, idx) => ({
+          id: `oi-${orderId}-${idx + 1}`,
+          order_id: orderId,
+          product_id: item.productId,
+          product_name: item.name,
+          size: item.size,
+          quantity: item.quantity,
+          unit_price: item.unitPrice,
+        }))
+      );
+
+      await supabase
+        .from('tasks')
+        .update({ title: `Preparar encomenda #${orderId} (${updatedOrder.customerName})` })
+        .eq('order_id', orderId);
+    } else {
+      const { error: orderErr } = await supabase.from('orders').insert({
+        id: updatedOrder.id,
+        customer_id: finalCustomerId,
+        customer_name: updatedOrder.customerName,
+        customer_email: updatedOrder.customerEmail,
+        customer_phone: updatedOrder.customerPhone,
+        shipping_address: updatedOrder.shippingAddress,
+        city: updatedOrder.city,
+        postal_code: updatedOrder.postalCode,
+        payment_method: updatedOrder.paymentMethod,
+        items: updatedOrder.items,
+        total: updatedOrder.total,
+        status: updatedOrder.status,
+        created_at: updatedOrder.createdAt,
+        progress_step: updatedOrder.progressStep,
+        total_steps: updatedOrder.totalSteps,
+      });
+      if (orderErr) throw new Error('Falha ao gravar encomenda na base de dados.');
+
+      await supabase.from('order_items').insert(
+        verifiedItems.map((item, idx) => ({
+          id: `oi-${orderId}-${idx + 1}`,
+          order_id: orderId,
+          product_id: item.productId,
+          product_name: item.name,
+          size: item.size,
+          quantity: item.quantity,
+          unit_price: item.unitPrice,
+        }))
+      );
+
+      await supabase.from('tasks').insert({
+        id: `task-${Date.now()}`,
+        title: `Preparar encomenda #${orderId} (${updatedOrder.customerName})`,
+        due_date: 'Hoje',
+        category: 'pedido',
+        order_id: orderId,
+        pinned: true,
+        notify: true,
+      });
+    }
+
+    // Apply net stock changes per product without double-deducting
+    const allProductIds = new Set([...oldQtyByProduct.keys(), ...newQtyByProduct.keys()]);
+    for (const pid of allProductIds) {
+      const prod = productMap.get(pid);
+      if (!prod) continue;
+      const oldQty = oldQtyByProduct.get(pid) || 0;
+      const newQty = newQtyByProduct.get(pid) || 0;
+      const netDelta = newQty - oldQty;
+      if (netDelta !== 0) {
+        await supabase
+          .from('products')
+          .update({ stock: Math.max(0, prod.stock - netDelta) })
+          .eq('id', pid);
+
+        await supabase.from('stock_movements').upsert(
+          {
+            id: `mov-${orderId}-${pid}`,
+            product_id: pid,
+            order_id: orderId,
+            delta: -newQty,
+            reason: `Venda na loja (#${orderId})`,
+          },
+          { onConflict: 'id' }
+        );
+      }
+    }
+
+    invalidatePublicStoreCache();
+    return updatedOrder;
+  }
+
+  invalidatePublicStoreCache();
+  const existingMem = requestedDraftId
+    ? memoryStore.orders.find((o) => o.id === requestedDraftId && o.status === 'Pendente')
+    : undefined;
+  const orderId = existingMem ? existingMem.id : `LUN-${Math.floor(2050 + (Date.now() % 7900))}`;
+  const createdAt = existingMem ? existingMem.createdAt : new Date().toISOString().slice(0, 10);
+  const normalizedEmail =
+    rawEmail && rawEmail.includes('@')
+      ? rawEmail
+      : `pendente-${orderId.toLowerCase()}@checkout.local`;
+
+  const oldQtyByProduct = new Map<string, number>();
+  if (existingMem) {
+    for (const oldItem of existingMem.items) {
+      if (oldItem.productId) {
+        oldQtyByProduct.set(
+          oldItem.productId,
+          (oldQtyByProduct.get(oldItem.productId) || 0) + oldItem.quantity
+        );
+      }
+    }
+  }
+  const newQtyByProduct = new Map<string, number>();
+  for (const item of verifiedItems) {
+    newQtyByProduct.set(item.productId, (newQtyByProduct.get(item.productId) || 0) + item.quantity);
+  }
+  if (input.strictStock) {
+    for (const [pid, newQty] of newQtyByProduct.entries()) {
+      const prod = productMap.get(pid)!;
+      const deltaNeeded = newQty - (oldQtyByProduct.get(pid) || 0);
+      if (deltaNeeded > 0 && prod.stock < deltaNeeded) {
+        throw new Error(`Stock insuficiente para ${prod.name}.`);
+      }
+    }
+  }
+
+  let cust = memoryStore.customers.find((c) => c.email.toLowerCase() === normalizedEmail);
+  if (!cust) {
+    cust = {
+      id: existingMem?.customerId || `cust-${Date.now()}`,
+      name: safeCustomerName,
+      email: normalizedEmail,
+      phone: safePhone,
+      shippingAddress: safeAddress,
+      city: safeCity,
+      postalCode: safePostal,
+    };
+    memoryStore.customers = [cust, ...memoryStore.customers];
+  } else {
+    cust.name = safeCustomerName;
+    cust.phone = safePhone;
+    cust.shippingAddress = safeAddress;
+    cust.city = safeCity;
+    cust.postalCode = safePostal;
+  }
+
+  const nextOrder: StoreOrder = {
+    id: orderId,
+    customerId: cust.id,
+    customerName: safeCustomerName,
+    customerEmail: normalizedEmail,
+    customerPhone: safePhone,
+    shippingAddress: safeAddress,
+    city: safeCity,
+    postalCode: safePostal,
+    paymentMethod: input.paymentMethod,
+    items: verifiedItems,
+    total,
+    status: 'Pendente',
+    createdAt,
+    progressStep: 1,
+    totalSteps: 3,
+  };
+
+  if (existingMem) {
+    memoryStore.orders = memoryStore.orders.map((o) => (o.id === orderId ? nextOrder : o));
+    memoryStore.tasks = memoryStore.tasks.map((t) =>
+      t.orderId === orderId
+        ? { ...t, title: `Preparar encomenda #${orderId} (${nextOrder.customerName})` }
+        : t
+    );
+  } else {
+    memoryStore.orders = [nextOrder, ...memoryStore.orders];
+    memoryStore.tasks = [
+      {
+        id: `task-${Date.now()}`,
+        title: `Preparar encomenda #${orderId} (${nextOrder.customerName})`,
+        dueDate: 'Hoje',
+        category: 'pedido',
+        orderId,
+        pinned: true,
+        notify: true,
+      },
+      ...memoryStore.tasks,
+    ];
+  }
+
+  memoryStore.products = memoryStore.products.map((prod) => {
+    const oldQty = oldQtyByProduct.get(prod.id) || 0;
+    const newQty = newQtyByProduct.get(prod.id) || 0;
+    const netDelta = newQty - oldQty;
+    return netDelta !== 0 ? { ...prod, stock: Math.max(0, prod.stock - netDelta) } : prod;
+  });
+
+  return nextOrder;
+}
+
 export async function createOrderInStore(input: {
+  draftOrderId?: string;
   customerName: string;
   customerEmail: string;
   customerPhone: string;
@@ -1250,6 +1722,13 @@ export async function createOrderInStore(input: {
   items: { productId: string; size: string; quantity: number }[];
   discountApplied: boolean;
 }): Promise<StoreOrder> {
+  if (input.draftOrderId && input.draftOrderId.trim()) {
+    return upsertCheckoutPendingOrderInStore({
+      ...input,
+      strictStock: true,
+    });
+  }
+
   const publicData = await getPublicStoreData();
   const productMap = new Map(publicData.products.map((p) => [p.id, p]));
 
@@ -1482,12 +1961,6 @@ export async function createManualOrderInStore(input: {
       const prod = productMap.get(trimmedProductId);
       if (!prod) {
         throw new Error('Produto selecionado não encontrado no catálogo.');
-      }
-      const alreadyQueued = stockDeductions
-        .filter((d) => d.prod.id === prod.id)
-        .reduce((s, d) => s + d.quantity, 0);
-      if (prod.stock < alreadyQueued + qty) {
-        throw new Error(`Stock insuficiente para ${prod.name}. Disponível: ${prod.stock} un.`);
       }
       const unitPrice =
         line.unitPrice !== undefined && Number.isFinite(Number(line.unitPrice)) && Number(line.unitPrice) >= 0
@@ -1865,7 +2338,7 @@ export async function deleteOrderInStore(orderId: string) {
 
     const custId = existingOrder.customer_id ? String(existingOrder.customer_id) : '';
     const custEmail = String(existingOrder.customer_email || '').toLowerCase();
-    if (custId && custEmail.endsWith('@registo.local')) {
+    if (custId && (custEmail.endsWith('@registo.local') || custEmail.endsWith('@checkout.local'))) {
       const { count } = await supabase
         .from('orders')
         .select('id', { count: 'exact', head: true })
@@ -2001,7 +2474,7 @@ export async function updateProductInStore(id: string, updates: Partial<Product>
     await ensureSupabaseSeeded(supabase).catch(() => false);
     const { data: existing } = await supabase
       .from('products')
-      .select('stock')
+      .select('stock, colors')
       .eq('id', id)
       .maybeSingle();
 
@@ -2029,26 +2502,51 @@ export async function updateProductInStore(id: string, updates: Partial<Product>
     }
     if (updates.stock !== undefined) rowUpdates.stock = updates.stock;
     if (updates.sizes !== undefined) rowUpdates.sizes = updates.sizes;
-    if (updates.colorVariants !== undefined) {
-      const persistedVariants = await Promise.all(
-        updates.colorVariants.map(async (v) => ({
-          ...v,
-          image: await persistImageAsset(supabase, v.image, 'products'),
-        }))
-      );
-      if (persistedVariants.length > 0) {
-        rowUpdates.colors = persistedVariants;
+
+    if (
+      updates.colorVariants !== undefined ||
+      updates.colors !== undefined ||
+      updates.sizeMeasurements !== undefined
+    ) {
+      const parsedExisting = parseProductColors(existing?.colors);
+      let nextVariants = parsedExisting.colorVariants;
+      let nextColors = parsedExisting.colors;
+
+      if (updates.colorVariants !== undefined) {
+        nextVariants = await Promise.all(
+          updates.colorVariants.map(async (v) => ({
+            ...v,
+            image: await persistImageAsset(supabase, v.image, 'products'),
+          }))
+        );
+        nextColors =
+          nextVariants.length > 0
+            ? nextVariants.map((v) => v.name)
+            : updates.colors && updates.colors.length > 0
+            ? updates.colors
+            : ['Neutro'];
       } else if (updates.colors !== undefined) {
-        rowUpdates.colors = updates.colors.length > 0 ? updates.colors : ['Neutro'];
+        nextColors = updates.colors.length > 0 ? updates.colors : ['Neutro'];
       }
-    } else if (updates.colors !== undefined) {
-      rowUpdates.colors = updates.colors;
+
+      const nextMeasurements =
+        updates.sizeMeasurements !== undefined
+          ? updates.sizeMeasurements
+          : parsedExisting.sizeMeasurements;
+
+      rowUpdates.colors = serializeProductColorsPayload(
+        nextColors,
+        nextVariants,
+        nextMeasurements
+      );
     }
+
     if (updates.description !== undefined) rowUpdates.description = updates.description;
     if (updates.material !== undefined) rowUpdates.material = updates.material;
     if (updates.image !== undefined) {
       rowUpdates.image = await persistImageAsset(supabase, updates.image, 'products');
     }
+    if (updates.featured !== undefined) rowUpdates.featured = updates.featured;
     if (updates.isNew !== undefined) rowUpdates.is_new = updates.isNew;
     if (updates.onSale !== undefined) rowUpdates.on_sale = updates.onSale;
 
@@ -2220,6 +2718,7 @@ export async function updateSettingsInStore(
     const {
       integrations: currentIntegrations,
       embeddedCosts: currentEmbeddedCosts,
+      embeddedEvents: currentEmbeddedEvents,
     } = extractIntegrationsAndConfig(currentRow?.integrations);
     const currentStorefrontConfig =
       resolveStorefrontFromRow(currentRow) || memoryStore.settings.storefrontConfig;
@@ -2264,6 +2763,14 @@ export async function updateSettingsInStore(
           }))
         );
       }
+      if (Array.isArray(merged.highlights) && merged.highlights.length > 0) {
+        merged.highlights = await Promise.all(
+          merged.highlights.map(async (h) => ({
+            ...h,
+            image: h.image ? await persistImageAsset(supabase, h.image, 'banners') : '',
+          }))
+        );
+      }
       if (merged.newsletter?.image) {
         merged.newsletter.image = await persistImageAsset(
           supabase,
@@ -2288,7 +2795,8 @@ export async function updateSettingsInStore(
         rowUpdates.integrations = packIntegrationsWithConfig(
           nextIntegrations,
           null,
-          currentEmbeddedCosts
+          currentEmbeddedCosts,
+          currentEmbeddedEvents
         );
       }
       if (nextStorefrontConfig) {
@@ -2300,7 +2808,8 @@ export async function updateSettingsInStore(
         rowUpdates.integrations = packIntegrationsWithConfig(
           nextIntegrations,
           configToEmbed,
-          currentEmbeddedCosts
+          currentEmbeddedCosts,
+          currentEmbeddedEvents
         );
       }
     }
@@ -2339,7 +2848,8 @@ export async function updateSettingsInStore(
             rowUpdates.integrations = packIntegrationsWithConfig(
               nextIntegrations,
               configToEmbed,
-              currentEmbeddedCosts
+              currentEmbeddedCosts,
+              currentEmbeddedEvents
             );
             res = await supabase
               .from('store_settings')
@@ -2496,13 +3006,15 @@ async function syncEmbeddedCostsToSettings(
     integrations: currentIntegrations,
     embeddedConfig: currentEmbeddedConfig,
     embeddedCosts,
+    embeddedEvents,
   } = extractIntegrationsAndConfig(currentRow?.integrations);
 
   const nextCosts = updater(embeddedCosts);
   const nextIntegrations = packIntegrationsWithConfig(
     currentIntegrations,
     currentEmbeddedConfig ? mergeStorefrontConfig(currentEmbeddedConfig) : null,
-    nextCosts
+    nextCosts,
+    embeddedEvents
   );
 
   const { error } = await supabase
@@ -2613,7 +3125,7 @@ export async function resetDemoDataInStore() {
   memoryStore.costs = [];
   memoryStore.newsletterEmails = [];
   memoryStore.livePresence = [];
-  memoryStore.analyticsEvents = [];
+  // Nota: Os registos do Analítico nunca são apagados.
   memoryStore.weeklySales = structuredClone(WEEKLY_SALES_DATA);
 
   const supabase = getSupabaseClient();
@@ -2634,7 +3146,7 @@ export async function resetDemoDataInStore() {
     await syncEmbeddedCostsToSettings(supabase, () => []).catch(() => false);
     if (hasAnalyticsTables) {
       await supabase.from('store_presence').delete().neq('session_id', '');
-      await supabase.from('store_analytics_events').delete().neq('id', '');
+      // store_analytics_events is permanent and never deleted.
     }
     await supabase.from('weekly_sales').upsert(
       WEEKLY_SALES_DATA.map((w, idx) => ({
@@ -2651,9 +3163,12 @@ export async function resetDemoDataInStore() {
 
 async function ensureAnalyticsTablesReady(supabase: SupabaseClient): Promise<boolean> {
   await ensureSupabaseSeeded(supabase).catch(() => false);
-  if (hasAnalyticsTables) return true;
+  if (hasAnalyticsTables) {
+    const check = await supabase.from('store_analytics_events').select('id').limit(1);
+    if (!check.error) return true;
+  }
 
-  const probe = await supabase.from('store_presence').select('session_id').limit(1);
+  const probe = await supabase.from('store_analytics_events').select('id').limit(1);
   if (!probe.error) {
     hasAnalyticsTables = true;
     return true;
@@ -2709,10 +3224,42 @@ async function ensureAnalyticsTablesReady(supabase: SupabaseClient): Promise<boo
       grant all on public.store_analytics_events to anon, authenticated, service_role;
       `.trim()
     ).catch(() => false);
-    const reProbe = await supabase.from('store_presence').select('session_id').limit(1);
+    const reProbe = await supabase.from('store_analytics_events').select('id').limit(1);
     hasAnalyticsTables = !reProbe.error;
   }
   return hasAnalyticsTables;
+}
+
+async function syncEmbeddedAnalyticsFallback(
+  supabase: SupabaseClient,
+  event: StoreAnalyticsEvent
+): Promise<boolean> {
+  const { data: currentRowData } = await supabase
+    .from('store_settings')
+    .select('integrations')
+    .eq('id', 1)
+    .maybeSingle();
+  const currentRow = currentRowData as Record<string, unknown> | null;
+  const {
+    integrations: currentIntegrations,
+    embeddedConfig: currentEmbeddedConfig,
+    embeddedCosts,
+    embeddedEvents,
+  } = extractIntegrationsAndConfig(currentRow?.integrations);
+
+  const merged = [event, ...embeddedEvents.filter((e) => e.id !== event.id)].slice(0, 400);
+  const nextIntegrations = packIntegrationsWithConfig(
+    currentIntegrations,
+    currentEmbeddedConfig ? mergeStorefrontConfig(currentEmbeddedConfig) : null,
+    embeddedCosts,
+    merged
+  );
+
+  const { error } = await supabase
+    .from('store_settings')
+    .update({ integrations: nextIntegrations })
+    .eq('id', 1);
+  return !error;
 }
 
 export async function upsertPresenceInStore(session: LiveVisitorSession): Promise<void> {
@@ -2768,106 +3315,137 @@ export async function removePresenceInStore(sessionId: string): Promise<void> {
 export async function recordAnalyticsEventInStore(event: StoreAnalyticsEvent): Promise<void> {
   if (!memoryStore.analyticsEvents.some((e) => e.id === event.id)) {
     memoryStore.analyticsEvents.unshift(event);
-    if (memoryStore.analyticsEvents.length > 500) {
-      memoryStore.analyticsEvents.length = 500;
+    if (memoryStore.analyticsEvents.length > 1500) {
+      memoryStore.analyticsEvents.length = 1500;
     }
   }
 
   const supabase = getSupabaseClient();
-  if (supabase && (await ensureAnalyticsTablesReady(supabase))) {
-    const { error } = await supabase.from('store_analytics_events').upsert(
-      {
-        id: event.id,
-        session_id: event.sessionId,
-        visitor_label: event.visitorLabel,
-        event_type: event.eventType,
-        product_id: event.productId ?? null,
-        product_name: event.productName ?? null,
-        order_id: event.orderId ?? null,
-        customer_name: event.customerName ?? null,
-        customer_email: event.customerEmail ?? null,
-        city: event.city ?? null,
-        cart_count: event.cartCount,
-        cart_total: event.cartTotal,
-        details: event.details ?? null,
-        device: event.device ?? null,
-        created_at: event.createdAt,
-      },
-      { onConflict: 'id' }
-    );
-    if (error) {
-      console.warn('recordAnalyticsEventInStore error:', error.code, error.message);
+  if (supabase) {
+    let savedToTable = false;
+    if (await ensureAnalyticsTablesReady(supabase)) {
+      const { error } = await supabase.from('store_analytics_events').upsert(
+        {
+          id: event.id,
+          session_id: event.sessionId,
+          visitor_label: event.visitorLabel,
+          event_type: event.eventType,
+          product_id: event.productId ?? null,
+          product_name: event.productName ?? null,
+          order_id: event.orderId ?? null,
+          customer_name: event.customerName ?? null,
+          customer_email: event.customerEmail ?? null,
+          city: event.city ?? null,
+          cart_count: event.cartCount,
+          cart_total: event.cartTotal,
+          details: event.details ?? null,
+          device: event.device ?? null,
+          created_at: event.createdAt,
+        },
+        { onConflict: 'id' }
+      );
+      if (!error) {
+        savedToTable = true;
+      } else {
+        console.warn('recordAnalyticsEventInStore error:', error.code, error.message);
+      }
+    }
+
+    if (!savedToTable) {
+      await syncEmbeddedAnalyticsFallback(supabase, event).catch(() => false);
     }
   }
 }
 
-export async function getPersistedRealtimeSnapshot(limit = 300): Promise<{
+export async function getPersistedRealtimeSnapshot(limit = 2000): Promise<{
   sessions: LiveVisitorSession[];
   events: StoreAnalyticsEvent[];
 }> {
   const activeCutoffIso = new Date(Date.now() - 105_000).toISOString();
   const supabase = getSupabaseClient();
-  if (supabase && (await ensureAnalyticsTablesReady(supabase))) {
-    const [presRes, evtRes] = await Promise.all([
-      supabase
-        .from('store_presence')
-        .select('*')
-        .gte('last_seen_at', activeCutoffIso)
-        .order('last_seen_at', { ascending: false })
-        .limit(200),
-      supabase
-        .from('store_analytics_events')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(limit),
+  if (supabase) {
+    const tablesReady = await ensureAnalyticsTablesReady(supabase).catch(() => false);
+    const [presRes, evtRes, setRes] = await Promise.all([
+      tablesReady
+        ? supabase
+            .from('store_presence')
+            .select('*')
+            .gte('last_seen_at', activeCutoffIso)
+            .order('last_seen_at', { ascending: false })
+            .limit(200)
+        : Promise.resolve({ data: null, error: { message: 'not_ready' } }),
+      tablesReady
+        ? supabase
+            .from('store_analytics_events')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(limit)
+        : Promise.resolve({ data: null, error: { message: 'not_ready' } }),
+      supabase.from('store_settings').select('integrations').eq('id', 1).maybeSingle(),
     ]);
 
-    if (presRes.error || evtRes.error) {
-      console.warn(
-        'getPersistedRealtimeSnapshot query warning:',
-        presRes.error?.message || evtRes.error?.message
-      );
-    } else {
-      const sessions: LiveVisitorSession[] = (presRes.data ?? []).map((r) => ({
-        sessionId: String(r.session_id),
-        visitorLabel: String(r.visitor_label),
-        stage: String(r.stage) as VisitorStage,
-        productId: r.product_id ? String(r.product_id) : undefined,
-        productName: r.product_name ? String(r.product_name) : undefined,
-        cartCount: Number(r.cart_count ?? 0),
-        cartTotal: Number(r.cart_total ?? 0),
-        cartItemsSummary: Array.isArray(r.cart_items_summary)
-          ? r.cart_items_summary.map(String)
-          : [],
-        customerName: r.customer_name ? String(r.customer_name) : undefined,
-        customerEmail: r.customer_email ? String(r.customer_email) : undefined,
-        city: r.city ? String(r.city) : undefined,
-        device: String(r.device || 'Web'),
-        startedAt: String(r.started_at),
-        lastSeenAt: String(r.last_seen_at),
-        completedOrderId: r.completed_order_id ? String(r.completed_order_id) : undefined,
-      }));
+    const { embeddedEvents } = extractIntegrationsAndConfig(
+      (setRes.data as Record<string, unknown> | null)?.integrations
+    );
 
-      const events: StoreAnalyticsEvent[] = (evtRes.data ?? []).map((e) => ({
-        id: String(e.id),
-        sessionId: String(e.session_id),
-        visitorLabel: String(e.visitor_label),
-        eventType: String(e.event_type) as StoreAnalyticsEvent['eventType'],
-        productId: e.product_id ? String(e.product_id) : undefined,
-        productName: e.product_name ? String(e.product_name) : undefined,
-        orderId: e.order_id ? String(e.order_id) : undefined,
-        customerName: e.customer_name ? String(e.customer_name) : undefined,
-        customerEmail: e.customer_email ? String(e.customer_email) : undefined,
-        city: e.city ? String(e.city) : undefined,
-        cartCount: Number(e.cart_count ?? 0),
-        cartTotal: Number(e.cart_total ?? 0),
-        details: e.details ? String(e.details) : undefined,
-        device: e.device ? String(e.device) : undefined,
-        createdAt: String(e.created_at),
-      }));
+    const sessions: LiveVisitorSession[] =
+      !presRes.error && Array.isArray(presRes.data)
+        ? presRes.data.map((r) => ({
+            sessionId: String(r.session_id),
+            visitorLabel: String(r.visitor_label),
+            stage: String(r.stage) as VisitorStage,
+            productId: r.product_id ? String(r.product_id) : undefined,
+            productName: r.product_name ? String(r.product_name) : undefined,
+            cartCount: Number(r.cart_count ?? 0),
+            cartTotal: Number(r.cart_total ?? 0),
+            cartItemsSummary: Array.isArray(r.cart_items_summary)
+              ? r.cart_items_summary.map(String)
+              : [],
+            customerName: r.customer_name ? String(r.customer_name) : undefined,
+            customerEmail: r.customer_email ? String(r.customer_email) : undefined,
+            city: r.city ? String(r.city) : undefined,
+            device: String(r.device || 'Web'),
+            startedAt: String(r.started_at),
+            lastSeenAt: String(r.last_seen_at),
+            completedOrderId: r.completed_order_id ? String(r.completed_order_id) : undefined,
+          }))
+        : memoryStore.livePresence.filter((s) => s.lastSeenAt >= activeCutoffIso);
 
-      return { sessions, events };
+    const tableEvents: StoreAnalyticsEvent[] =
+      !evtRes.error && Array.isArray(evtRes.data)
+        ? evtRes.data.map((e) => ({
+            id: String(e.id),
+            sessionId: String(e.session_id),
+            visitorLabel: String(e.visitor_label),
+            eventType: String(e.event_type) as StoreAnalyticsEvent['eventType'],
+            productId: e.product_id ? String(e.product_id) : undefined,
+            productName: e.product_name ? String(e.product_name) : undefined,
+            orderId: e.order_id ? String(e.order_id) : undefined,
+            customerName: e.customer_name ? String(e.customer_name) : undefined,
+            customerEmail: e.customer_email ? String(e.customer_email) : undefined,
+            city: e.city ? String(e.city) : undefined,
+            cartCount: Number(e.cart_count ?? 0),
+            cartTotal: Number(e.cart_total ?? 0),
+            details: e.details ? String(e.details) : undefined,
+            device: e.device ? String(e.device) : undefined,
+            createdAt: String(e.created_at),
+          }))
+        : [];
+
+    const eventMap = new Map<string, StoreAnalyticsEvent>();
+    for (const e of tableEvents) eventMap.set(e.id, e);
+    for (const e of embeddedEvents) {
+      if (!eventMap.has(e.id)) eventMap.set(e.id, e);
     }
+    for (const e of memoryStore.analyticsEvents) {
+      if (!eventMap.has(e.id)) eventMap.set(e.id, e);
+    }
+
+    const events = Array.from(eventMap.values())
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, limit);
+
+    return { sessions, events };
   }
 
   return {

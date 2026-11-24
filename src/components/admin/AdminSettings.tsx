@@ -7,14 +7,16 @@ import {
   RotateCcw,
   SlidersHorizontal,
   Sparkles,
+  Star,
   Trash2,
 } from 'lucide-react';
 import { DEFAULT_STOREFRONT_CONFIG } from '../../data/seedData';
 import { useStore } from '../../context/StoreContext';
-import { StorefrontConfig } from '../../types/store';
+import { HighlightCardConfig, ProductCategory, StorefrontConfig } from '../../types/store';
+import { formatMoney } from '../../utils/currency';
 import { ImageField } from './ImageField';
 
-type SettingsSection = 'geral' | 'banner' | 'catalogo_rodape';
+type SettingsSection = 'geral' | 'banner' | 'destaques' | 'catalogo_rodape';
 
 function mergeStorefrontConfig(cfg?: Partial<StorefrontConfig>): StorefrontConfig {
   return {
@@ -52,6 +54,7 @@ function mergeStorefrontConfig(cfg?: Partial<StorefrontConfig>): StorefrontConfi
           ? cfg.bottomBanner.slides
           : DEFAULT_STOREFRONT_CONFIG.bottomBanner!.slides,
     },
+    highlights: Array.isArray(cfg?.highlights) ? cfg.highlights : [],
     guarantees:
       cfg?.guarantees && cfg.guarantees.length > 0
         ? cfg.guarantees
@@ -70,6 +73,8 @@ function mergeStorefrontConfig(cfg?: Partial<StorefrontConfig>): StorefrontConfi
 export const AdminSettings: React.FC = () => {
   const {
     settings,
+    products,
+    updateProduct,
     updateSettings,
     toggleIntegration,
     addIntegration,
@@ -232,6 +237,7 @@ export const AdminSettings: React.FC = () => {
   }[] = [
     { id: 'geral', label: 'Geral, Marca & Menu', icon: SlidersHorizontal },
     { id: 'banner', label: 'Banners da Loja (Topo & Rodapé)', icon: Sparkles },
+    { id: 'destaques', label: 'Destaques', icon: Star },
     { id: 'catalogo_rodape', label: 'Catálogo, Código Promo & Rodapé', icon: LayoutTemplate },
   ];
 
@@ -1117,6 +1123,289 @@ export const AdminSettings: React.FC = () => {
           })()}
         </div>
       )}
+
+      {/* SECTION 2.5: DESTAQUES */}
+      {section === 'destaques' && (() => {
+        const highlights = sf.highlights || [];
+        const addHighlight = () => {
+          const nextItem: HighlightCardConfig = {
+            id: `hl-${Date.now()}`,
+            badge: 'Destaque',
+            title: 'Novo Destaque da Semana',
+            subtitle: 'Seleção exclusiva disponível agora na loja.',
+            ctaText: 'Ver Destaque',
+            image: '',
+            targetCategory: 'Todos',
+            productId: products[0]?.id || '',
+          };
+          updateSfDraft({ ...sf, highlights: [...highlights, nextItem] });
+        };
+
+        const updateHighlightAt = (idx: number, patch: Partial<HighlightCardConfig>) => {
+          const next = [...highlights];
+          next[idx] = { ...next[idx], ...patch };
+          updateSfDraft({ ...sf, highlights: next });
+        };
+
+        const removeHighlightAt = (idx: number) => {
+          const filtered = highlights.filter((_, i) => i !== idx);
+          void persistStorefrontDraft({ ...sf, highlights: filtered });
+        };
+
+        return (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+            {/* Cartões de Destaque (Criar & Editar) */}
+            <div className="lg:col-span-7 bg-white rounded-[24px] p-6 border border-black/5 space-y-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-base font-semibold text-[#1C1C1E]">
+                    Destaques da Vitrine ({highlights.length})
+                  </h3>
+                  <p className="text-[11px] text-[#72726E] mt-0.5">
+                    Crie e edite cartões de destaque exclusivos na página principal da loja e ligue cada um a um produto ou categoria.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={addHighlight}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-[#1C1C1E] text-white text-xs font-medium hover:bg-[#323235] cursor-pointer shrink-0"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Criar Destaque</span>
+                </button>
+              </div>
+
+              {highlights.length === 0 ? (
+                <div className="rounded-2xl bg-[#F6F6F4] p-8 text-center space-y-3 border border-black/5">
+                  <Star className="w-6 h-6 text-[#8A8A85] mx-auto" />
+                  <p className="text-xs font-medium text-[#1C1C1E]">
+                    Ainda não criou nenhum cartão de destaque personalizado.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={addHighlight}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-[#1C1C1E] text-white text-xs font-medium hover:bg-[#323235] cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Criar Primeiro Destaque</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {highlights.map((hl, idx) => (
+                    <div key={hl.id} className="p-4 rounded-2xl bg-[#F6F6F4] space-y-3 border border-black/6">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-mono font-semibold text-[#1C1C1E]">
+                          Destaque #{String(idx + 1).padStart(2, '0')}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => removeHighlightAt(idx)}
+                          className="inline-flex items-center gap-1 text-[11px] text-red-700 hover:underline cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Eliminar</span>
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[11px] font-medium text-[#555552] mb-1">
+                            Etiqueta / Selo
+                          </label>
+                          <input
+                            type="text"
+                            value={hl.badge}
+                            onChange={(e) => updateHighlightAt(idx, { badge: e.target.value })}
+                            placeholder="Ex: Edição Limitada"
+                            className="w-full bg-white border border-black/15 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#1C1C1E]"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-medium text-[#555552] mb-1">
+                            Título do Destaque
+                          </label>
+                          <input
+                            type="text"
+                            value={hl.title}
+                            onChange={(e) => updateHighlightAt(idx, { title: e.target.value })}
+                            placeholder="Ex: Novas Calças Alfaiataria"
+                            className="w-full bg-white border border-black/15 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#1C1C1E]"
+                          />
+                        </div>
+
+                        <div className="sm:col-span-2">
+                          <label className="block text-[11px] font-medium text-[#555552] mb-1">
+                            Descrição Curta
+                          </label>
+                          <input
+                            type="text"
+                            value={hl.subtitle}
+                            onChange={(e) => updateHighlightAt(idx, { subtitle: e.target.value })}
+                            placeholder="Ex: Corte fluido em linho premium..."
+                            className="w-full bg-white border border-black/15 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#1C1C1E]"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-medium text-[#555552] mb-1">
+                            Texto do Botão
+                          </label>
+                          <input
+                            type="text"
+                            value={hl.ctaText}
+                            onChange={(e) => updateHighlightAt(idx, { ctaText: e.target.value })}
+                            placeholder="Ex: Ver Peça"
+                            className="w-full bg-white border border-black/15 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#1C1C1E]"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-medium text-[#555552] mb-1">
+                            Produto em Destaque (opcional)
+                          </label>
+                          <select
+                            value={hl.productId || ''}
+                            onChange={(e) => updateHighlightAt(idx, { productId: e.target.value })}
+                            className="w-full bg-white border border-black/15 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#1C1C1E]"
+                          >
+                            <option value="">Abrir por categoria</option>
+                            {products.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.name} ({formatMoney(p.price, settings.currencySymbol)})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {!hl.productId && (
+                          <div className="sm:col-span-2">
+                            <label className="block text-[11px] font-medium text-[#555552] mb-1">
+                              Categoria de Destino
+                            </label>
+                            <select
+                              value={hl.targetCategory}
+                              onChange={(e) =>
+                                updateHighlightAt(idx, {
+                                  targetCategory: e.target.value as ProductCategory | 'Todos',
+                                })
+                              }
+                              className="w-full bg-white border border-black/15 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#1C1C1E]"
+                            >
+                              {(
+                                [
+                                  'Todos',
+                                  'Mulher',
+                                  'Homem',
+                                  'Vestidos',
+                                  'Tops',
+                                  'Calçado',
+                                  'Malas',
+                                  'Acessórios',
+                                  'Saldos',
+                                ] as const
+                              ).map((cat) => (
+                                <option key={cat} value={cat}>
+                                  {cat}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                      </div>
+
+                      <ImageField
+                        label="Fotografia do Destaque"
+                        recommendedSize="1200 × 900 px"
+                        value={hl.image}
+                        onChange={(url) => updateHighlightAt(idx, { image: url })}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="pt-3 border-t border-black/6 flex flex-wrap items-center justify-end gap-3">
+                {savedNotice && (
+                  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+                    <Check className="w-4 h-4" />
+                    <span>Destaques guardados na base de dados</span>
+                  </span>
+                )}
+                {saveError && <span className="text-xs text-red-700">{saveError}</span>}
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => handleSaveAll()}
+                  className="px-5 py-2.5 bg-[#1C1C1E] text-white text-xs font-medium rounded-full hover:bg-[#323235] disabled:opacity-60 cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  {saving ? 'A guardar...' : 'Guardar Destaques'}
+                </button>
+              </div>
+            </div>
+
+            {/* Título & Seleção Rápida de Produtos em Destaque */}
+            <div className="lg:col-span-5 space-y-5">
+              <div className="bg-white rounded-[24px] p-6 border border-black/5 space-y-4">
+                <div>
+                  <h3 className="text-base font-semibold text-[#1C1C1E]">
+                    Secção & Produtos em Destaque
+                  </h3>
+                  <p className="text-[11px] text-[#72726E] mt-0.5">
+                    Personalize o título do carrossel e escolha rapidamente quais peças aparecem nos destaques da loja.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-[#555552] mb-1">
+                    Título do Carrossel de Destaques
+                  </label>
+                  <input
+                    type="text"
+                    value={sf.catalogTitle}
+                    onChange={(e) => updateSfDraft({ ...sf, catalogTitle: e.target.value })}
+                    placeholder="Ex: As Nossas Escolhas Favoritas"
+                    className="w-full border border-black/15 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:border-[#1C1C1E]"
+                  />
+                </div>
+
+                <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+                  {products.length === 0 ? (
+                    <p className="text-xs text-[#72726E]">Sem produtos no catálogo.</p>
+                  ) : (
+                    products.map((p) => (
+                      <div
+                        key={p.id}
+                        className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-[#F6F6F4]"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium text-[#1C1C1E] truncate">{p.name}</p>
+                          <p className="text-[11px] text-[#72726E] font-mono">
+                            {formatMoney(p.price, settings.currencySymbol)}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => updateProduct(p.id, { featured: !p.featured })}
+                          className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-medium transition-colors cursor-pointer shrink-0 ${
+                            p.featured
+                              ? 'bg-[#1C1C1E] text-white'
+                              : 'bg-white text-[#555552] border border-black/10 hover:border-[#1C1C1E]'
+                          }`}
+                        >
+                          <Star className={`w-3 h-3 ${p.featured ? 'fill-white' : ''}`} />
+                          <span>{p.featured ? 'Em Destaque' : 'Destacar'}</span>
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* SECTION 3: CATÁLOGO, CÓDIGO PROMO & RODAPÉ */}
       {section === 'catalogo_rodape' && (

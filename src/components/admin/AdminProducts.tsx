@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { ArrowDownRight, ArrowUpRight, Edit2, Plus, Trash2 } from 'lucide-react';
+import { ArrowDownRight, ArrowUpRight, Edit2, Plus, Star, Trash2 } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import { Product } from '../../types/store';
 import { formatMoney } from '../../utils/currency';
@@ -60,6 +60,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                 <th className="py-3.5 px-5">Produto</th>
                 <th className="py-3.5 px-4">SKU</th>
                 <th className="py-3.5 px-4">Categoria</th>
+                <th className="py-3.5 px-4 text-center">Destaque</th>
                 <th className="py-3.5 px-4 text-right">Preço</th>
                 <th className="py-3.5 px-4 text-right">Stock</th>
                 <th className="py-3.5 px-5 text-right">Gerir</th>
@@ -68,7 +69,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
             <tbody className="divide-y divide-black/5 text-[13px]">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-14 px-6 text-center space-y-3">
+                  <td colSpan={7} className="py-14 px-6 text-center space-y-3">
                     <p className="text-sm text-[#72726E]">
                       {products.length === 0
                         ? 'Nenhum produto registado no catálogo.'
@@ -106,12 +107,38 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                             </p>
                             <p className="text-[11px] text-[#72726E]">
                               {product.sizes.join(' / ')}
+                              {product.sizeMeasurements && product.sizeMeasurements.length > 0
+                                ? ` · ${product.sizeMeasurements.length} medida(s)`
+                                : ''}
                             </p>
                           </div>
                         </div>
                       </td>
                       <td className="py-3 px-4 font-mono text-xs text-[#555552]">{product.sku}</td>
                       <td className="py-3 px-4 text-[#555552]">{product.category}</td>
+                      <td className="py-3 px-4 text-center">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateProduct(product.id, { featured: !product.featured })
+                          }
+                          title={
+                            product.featured
+                              ? 'Remover dos Destaques'
+                              : 'Adicionar aos Destaques'
+                          }
+                          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors cursor-pointer ${
+                            product.featured
+                              ? 'bg-[#1C1C1E] text-white'
+                              : 'bg-[#F2F1EE] text-[#72726E] hover:text-[#1C1C1E]'
+                          }`}
+                        >
+                          <Star
+                            className={`w-3 h-3 ${product.featured ? 'fill-white' : ''}`}
+                          />
+                          <span>{product.featured ? 'Sim' : 'Não'}</span>
+                        </button>
+                      </td>
                       <td className="py-3 px-4 text-right font-mono font-semibold tabular-nums whitespace-nowrap">
                         {formatMoney(product.price, settings.currencySymbol)}
                       </td>

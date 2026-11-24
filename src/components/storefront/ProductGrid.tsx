@@ -174,6 +174,69 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
       id="catalog"
       className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 pt-4 lg:pt-6 pb-10 lg:pb-12 space-y-8 lg:space-y-10"
     >
+      {/* CUSTOM VITRINE HIGHLIGHTS (DESTAQUES) */}
+      {Array.isArray(cfg.highlights) && cfg.highlights.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#777777]">
+              Destaques
+            </span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+            {cfg.highlights.map((hl) => {
+              const linkedProduct = hl.productId
+                ? products.find((p) => p.id === hl.productId)
+                : undefined;
+              return (
+                <article
+                  key={hl.id}
+                  onClick={() => {
+                    if (linkedProduct) {
+                      setQuickViewProduct(linkedProduct);
+                    } else {
+                      if (wishlistOnly) onResetView();
+                      setSelectedCategory(hl.targetCategory || 'Todos');
+                    }
+                  }}
+                  className="group cursor-pointer rounded-[22px] bg-[#111111] text-white overflow-hidden flex flex-col sm:flex-row md:flex-col justify-between transition-transform duration-200 hover:-translate-y-0.5"
+                >
+                  {hl.image && (
+                    <div className="w-full h-44 sm:w-44 md:w-full sm:h-auto md:h-48 bg-[#1B1B1B] overflow-hidden shrink-0">
+                      <SafeImage
+                        src={hl.image}
+                        alt={hl.title}
+                        className="w-full h-full object-cover object-center transition-transform duration-300 group-hover:scale-[1.03]"
+                      />
+                    </div>
+                  )}
+                  <div className="p-5 flex-1 flex flex-col justify-between gap-3">
+                    <div className="space-y-1.5">
+                      {hl.badge && (
+                        <span className="inline-block px-2.5 py-0.5 rounded-full bg-white/12 text-white text-[10px] font-medium">
+                          {hl.badge}
+                        </span>
+                      )}
+                      <h3 className="text-base sm:text-lg font-semibold leading-snug text-white">
+                        {hl.title}
+                      </h3>
+                      {hl.subtitle && (
+                        <p className="text-xs text-white/70 line-clamp-2">{hl.subtitle}</p>
+                      )}
+                    </div>
+                    <div className="pt-1">
+                      <span className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-white text-[#111111] text-xs font-semibold">
+                        <span>{hl.ctaText || 'Ver Destaque'}</span>
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </span>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* ALWAYS-VISIBLE HORIZONTAL CAROUSEL: "As Nossas Escolhas Favoritas" */}
       <div className="space-y-4">
         <div className="flex items-center justify-between gap-4">

@@ -120,6 +120,18 @@ export const AdminRealtimeAnalytics: React.FC = () => {
     }
   }, []);
 
+  const mergeEvents = useCallback(
+    (prev: StoreAnalyticsEvent[], incoming: StoreAnalyticsEvent[]): StoreAnalyticsEvent[] => {
+      const map = new Map<string, StoreAnalyticsEvent>();
+      for (const e of prev) map.set(e.id, e);
+      for (const e of incoming) map.set(e.id, e);
+      return Array.from(map.values())
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .slice(0, 2000);
+    },
+    []
+  );
+
   const fetchSnapshot = useCallback(async () => {
     if (!adminToken) return;
     try {
@@ -134,7 +146,7 @@ export const AdminRealtimeAnalytics: React.FC = () => {
         setSessions(data.sessions);
       }
       if (Array.isArray(data.events)) {
-        setEvents(data.events);
+        setEvents((prev) => mergeEvents(prev, data.events));
       }
       setLastUpdatedAt(new Date().toISOString());
     } catch {
@@ -142,7 +154,7 @@ export const AdminRealtimeAnalytics: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [adminToken, syncServerClock]);
+  }, [adminToken, syncServerClock, mergeEvents]);
 
   useEffect(() => {
     const tick = window.setInterval(() => setNowMs(Date.now()), 5000);
@@ -170,7 +182,9 @@ export const AdminRealtimeAnalytics: React.FC = () => {
             if (msg.type === 'snapshot' && msg.payload) {
               syncServerClock(msg.payload.serverTime);
               if (Array.isArray(msg.payload.sessions)) setSessions(msg.payload.sessions);
-              if (Array.isArray(msg.payload.events)) setEvents(msg.payload.events);
+              if (Array.isArray(msg.payload.events)) {
+                setEvents((prev) => mergeEvents(prev, msg.payload.events));
+              }
               setLastUpdatedAt(new Date().toISOString());
               setLoading(false);
             } else if (msg.type === 'presence:upsert' && msg.payload) {
@@ -192,7 +206,7 @@ export const AdminRealtimeAnalytics: React.FC = () => {
             } else if (msg.type === 'analytics:event' && msg.payload) {
               const evt = msg.payload as StoreAnalyticsEvent;
               setEvents((prev) =>
-                prev.some((x) => x.id === evt.id) ? prev : [evt, ...prev].slice(0, 300)
+                prev.some((x) => x.id === evt.id) ? prev : [evt, ...prev].slice(0, 2000)
               );
               setLastUpdatedAt(new Date().toISOString());
             }
@@ -229,7 +243,9 @@ export const AdminRealtimeAnalytics: React.FC = () => {
           if (msg.type === 'snapshot' && msg.payload) {
             syncServerClock(msg.payload.serverTime);
             if (Array.isArray(msg.payload.sessions)) setSessions(msg.payload.sessions);
-            if (Array.isArray(msg.payload.events)) setEvents(msg.payload.events);
+            if (Array.isArray(msg.payload.events)) {
+              setEvents((prev) => mergeEvents(prev, msg.payload.events));
+            }
             setLastUpdatedAt(new Date().toISOString());
             setLoading(false);
           } else if (msg.type === 'presence:upsert' && msg.payload) {
@@ -251,7 +267,7 @@ export const AdminRealtimeAnalytics: React.FC = () => {
           } else if (msg.type === 'analytics:event' && msg.payload) {
             const evt = msg.payload as StoreAnalyticsEvent;
             setEvents((prev) =>
-              prev.some((x) => x.id === evt.id) ? prev : [evt, ...prev].slice(0, 300)
+              prev.some((x) => x.id === evt.id) ? prev : [evt, ...prev].slice(0, 2000)
             );
             setLastUpdatedAt(new Date().toISOString());
           }
@@ -749,9 +765,14 @@ export const AdminRealtimeAnalytics: React.FC = () => {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Activity className="w-4 h-4 text-[#1C1C1E]" />
-              <h2 className="text-base font-semibold text-[#1C1C1E]">
-                Registo Completo ({filteredEvents.length})
-              </h2>
+              <div>
+                <h2 className="text-base font-semibold text-[#1C1C1E]">
+                  Registo Completo ({filteredEvents.length})
+                </h2>
+                <p className="text-[10px] text-emerald-700 font-medium">
+                  Arquivo permanente guardado · Nunca apagado
+                </p>
+              </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-1">

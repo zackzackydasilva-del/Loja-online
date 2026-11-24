@@ -17,6 +17,13 @@ export interface ProductColorVariant {
   image: string;
 }
 
+export interface ProductSizeMeasurement {
+  size: string;
+  width?: string;
+  height?: string;
+  waist?: string;
+}
+
 export interface Product {
   id: string;
   sku: string;
@@ -28,6 +35,7 @@ export interface Product {
   reviewCount: number;
   stock: number;
   sizes: string[];
+  sizeMeasurements?: ProductSizeMeasurement[];
   colors: string[];
   colorVariants?: ProductColorVariant[];
   description: string;
@@ -179,6 +187,17 @@ export interface BottomBannerConfig {
   slides: HeroSlideConfig[];
 }
 
+export interface HighlightCardConfig {
+  id: string;
+  badge: string;
+  title: string;
+  subtitle: string;
+  ctaText: string;
+  image: string;
+  targetCategory: ProductCategory | 'Todos';
+  productId?: string;
+}
+
 export interface StorefrontConfig {
   topNoticeText?: string;
   headerWordmark: string;
@@ -204,6 +223,7 @@ export interface StorefrontConfig {
   editorialCards: EditorialCardConfig[];
   promoBanners: PromoBannerConfig[];
   bottomBanner?: BottomBannerConfig;
+  highlights?: HighlightCardConfig[];
   catalogEyebrow: string;
   catalogTitle: string;
   guarantees: TrustBadgeConfig[];

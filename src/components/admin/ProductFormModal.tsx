@@ -2,7 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { Plus, Trash2, X } from 'lucide-react';
 import { ASSETS } from '../../data/seedData';
 import { useStore } from '../../context/StoreContext';
-import { Product, ProductCategory, ProductColorVariant } from '../../types/store';
+import {
+  Product,
+  ProductCategory,
+  ProductColorVariant,
+  ProductSizeMeasurement,
+} from '../../types/store';
 import { ImageField } from './ImageField';
 
 interface ProductFormModalProps {
@@ -39,7 +44,9 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   const [description, setDescription] = useState('');
   const [image, setImage] = useState(ASSETS.prodBag);
   const [colorVariants, setColorVariants] = useState<ProductColorVariant[]>([]);
+  const [sizeMeasurements, setSizeMeasurements] = useState<ProductSizeMeasurement[]>([]);
   const [isNew, setIsNew] = useState(true);
+  const [featured, setFeatured] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -59,7 +66,11 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       setColorVariants(
         Array.isArray(editingProduct.colorVariants) ? editingProduct.colorVariants : []
       );
+      setSizeMeasurements(
+        Array.isArray(editingProduct.sizeMeasurements) ? editingProduct.sizeMeasurements : []
+      );
       setIsNew(Boolean(editingProduct.isNew));
+      setFeatured(editingProduct.featured !== false);
     } else {
       setName('');
       setSku(`LUN-${Math.floor(100 + Math.random() * 900)}`);
@@ -72,11 +83,38 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       setDescription('Peça editorial desenhada com corte fluido e acabamento artesanal.');
       setImage(ASSETS.boutiqueRack);
       setColorVariants([]);
+      setSizeMeasurements([]);
       setIsNew(true);
+      setFeatured(true);
     }
   }, [editingProduct, isOpen]);
 
   if (!isOpen) return null;
+
+  const parsedSizes = sizesInput
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const displaySizes = parsedSizes.length > 0 ? parsedSizes : ['Único'];
+
+  const getMeasurementForSize = (size: string): ProductSizeMeasurement =>
+    sizeMeasurements.find((m) => m.size === size) || { size, width: '', height: '', waist: '' };
+
+  const updateSizeMeasurement = (
+    size: string,
+    field: 'width' | 'height' | 'waist',
+    value: string
+  ) => {
+    setSizeMeasurements((prev) => {
+      const idx = prev.findIndex((m) => m.size === size);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = { ...next[idx], [field]: value };
+        return next;
+      }
+      return [...prev, { size, [field]: value }];
+    });
+  };
 
   const handleAddColorVariant = () => {
     const nextIndex = colorVariants.length + 1;
@@ -104,6 +142,24 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       .map((v) => ({ name: v.name.trim(), image: v.image.trim() }))
       .filter((v) => v.name && v.image);
 
+    const activeSizes = sizes.length ? sizes : ['Único'];
+    const cleanedMeasurements = activeSizes
+      .map((sz) => {
+        const entry = sizeMeasurements.find((m) => m.size === sz);
+        if (!entry) return null;
+        const width = entry.width?.trim() || '';
+        const height = entry.height?.trim() || '';
+        const waist = entry.waist?.trim() || '';
+        if (!width && !height && !waist) return null;
+        return {
+          size: sz,
+          ...(width ? { width } : {}),
+          ...(height ? { height } : {}),
+          ...(waist ? { waist } : {}),
+        };
+      })
+      .filter((x): x is ProductSizeMeasurement => x !== null);
+
     const payload = {
       name: name.trim(),
       sku: sku.trim(),
@@ -112,7 +168,8 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       originalPrice: parsedOrig && parsedOrig > parsedPrice ? parsedOrig : undefined,
       onSale: Boolean(parsedOrig && parsedOrig > parsedPrice),
       stock: parsedStock,
-      sizes: sizes.length ? sizes : ['Único'],
+      sizes: activeSizes,
+      sizeMeasurements: cleanedMeasurements,
       colors:
         cleanedVariants.length > 0 ? cleanedVariants.map((v) => v.name) : ['Neutro'],
       colorVariants: cleanedVariants,
@@ -120,7 +177,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       description: description.trim(),
       image: image.trim(),
       isNew,
-      featured: true,
+      featured,
     };
 
     setSubmitting(true);
@@ -253,6 +310,64 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
             />
           </div>
 
+          {/* Medidas por Tamanho: Largura, Altura e Cintura */}
+          <div className="sm:col-span-2 rounded-2xl bg-[#F6F6F4] p-3.5 space-y-2.5 border border-black/6">
+            <div>
+              <p className="text-xs font-semibold text-[#1C1C1E]">
+                Medidas dos Tamanhos (Largura · Altura · Cintura em cm)
+              </p>
+              <p className="text-[11px] text-[#72726E] mt-0.5">
+                Opcional: informe as medidas exatas para cada tamanho aparecer na página do produto.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              {displaySizes.map((sz) => {
+                const m = getMeasurementForSize(sz);
+                return (
+                  <div
+                    key={sz}
+                    className="grid grid-cols-12 gap-2 items-center bg-white p-2 rounded-xl border border-black/6"
+                  >
+                    <span className="col-span-3 sm:col-span-2 text-xs font-semibold text-[#1C1C1E] px-2 truncate">
+                      Tam. {sz}
+                    </span>
+                    <div className="col-span-3">
+                      <input
+                        type="text"
+                        value={m.width || ''}
+                        onChange={(e) => updateSizeMeasurement(sz, 'width', e.target.value)}
+                        placeholder="Largura"
+                        aria-label={`Largura tamanho ${sz}`}
+                        className="w-full border border-black/15 rounded-lg px-2 py-1.5 text-[11px] focus:outline-none focus:border-[#1C1C1E]"
+                      />
+                    </div>
+                    <div className="col-span-3">
+                      <input
+                        type="text"
+                        value={m.height || ''}
+                        onChange={(e) => updateSizeMeasurement(sz, 'height', e.target.value)}
+                        placeholder="Altura"
+                        aria-label={`Altura tamanho ${sz}`}
+                        className="w-full border border-black/15 rounded-lg px-2 py-1.5 text-[11px] focus:outline-none focus:border-[#1C1C1E]"
+                      />
+                    </div>
+                    <div className="col-span-3 sm:col-span-4">
+                      <input
+                        type="text"
+                        value={m.waist || ''}
+                        onChange={(e) => updateSizeMeasurement(sz, 'waist', e.target.value)}
+                        placeholder="Cintura"
+                        aria-label={`Cintura tamanho ${sz}`}
+                        className="w-full border border-black/15 rounded-lg px-2 py-1.5 text-[11px] focus:outline-none focus:border-[#1C1C1E]"
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
           <div className="sm:col-span-2">
             <ImageField
               label="Fotografia Principal do Produto"
@@ -357,15 +472,27 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
             />
           </div>
 
-          <label className="sm:col-span-2 inline-flex items-center gap-2 text-xs text-[#1C1C1E] cursor-pointer">
-            <input
-              type="checkbox"
-              checked={isNew}
-              onChange={(e) => setIsNew(e.target.checked)}
-              className="rounded"
-            />
-            <span>Assinalar como Novidade na loja online</span>
-          </label>
+          <div className="sm:col-span-2 flex flex-wrap items-center gap-4 pt-1">
+            <label className="inline-flex items-center gap-2 text-xs text-[#1C1C1E] cursor-pointer">
+              <input
+                type="checkbox"
+                checked={featured}
+                onChange={(e) => setFeatured(e.target.checked)}
+                className="rounded"
+              />
+              <span>Mostrar nos Destaques da loja</span>
+            </label>
+
+            <label className="inline-flex items-center gap-2 text-xs text-[#1C1C1E] cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isNew}
+                onChange={(e) => setIsNew(e.target.checked)}
+                className="rounded"
+              />
+              <span>Assinalar como Novidade</span>
+            </label>
+          </div>
         </div>
 
         {errorMsg && (

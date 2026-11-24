@@ -25,15 +25,22 @@ import {
   updateSettingsInStore,
   updateTaskInStore,
   uploadImageAssetInStore,
+  upsertCheckoutPendingOrderInStore,
 } from './storeRepository.ts';
 import {
   getAuthoritativeRealtimeSnapshot,
   processPresenceLeaveAsync,
   processPresenceUpdateAsync,
+  recordCheckoutDraftAnalyticsAsync,
   recordOrderCompletionAnalyticsAsync,
   registerSseAdminClient,
 } from './presenceHub.ts';
-import type { OrderStatus, ProductColorVariant, StoreCostCategory } from '../types/store.ts';
+import type {
+  OrderStatus,
+  ProductColorVariant,
+  ProductSizeMeasurement,
+  StoreCostCategory,
+} from '../types/store.ts';
 
 export const app = express();
 
@@ -193,6 +200,61 @@ app.get('/api/store', async (_req, res) => {
   }
 });
 
+app.post('/api/orders/draft', async (req, res) => {
+  try {
+    const body = req.body ?? {};
+    if (!Array.isArray(body.items) || body.items.length === 0) {
+      res.status(400).json({ error: 'O saco de compras está vazio.' });
+      return;
+    }
+
+    const customerName = typeof body.customerName === 'string' ? body.customerName.trim() : '';
+    const customerPhone = typeof body.customerPhone === 'string' ? body.customerPhone.trim() : '';
+    const shippingAddress =
+      typeof body.shippingAddress === 'string' ? body.shippingAddress.trim() : '';
+    const city = typeof body.city === 'string' ? body.city.trim() : '';
+
+    if (
+      customerName.length < 2 ||
+      customerPhone.length < 6 ||
+      shippingAddress.length < 3 ||
+      city.length < 2
+    ) {
+      res.status(400).json({ error: 'Preencha os dados básicos de envio para guardar.' });
+      return;
+    }
+
+    const allowedPayments = ['Multicaixa Express', 'Cartão', 'Contra-Reembolso'];
+    const paymentMethod = allowedPayments.includes(body.paymentMethod)
+      ? body.paymentMethod
+      : 'Contra-Reembolso';
+
+    const order = await upsertCheckoutPendingOrderInStore({
+      draftOrderId: typeof body.draftOrderId === 'string' ? body.draftOrderId.trim() : undefined,
+      customerName,
+      customerEmail: typeof body.customerEmail === 'string' ? body.customerEmail : '',
+      customerPhone,
+      shippingAddress,
+      city,
+      postalCode: typeof body.postalCode === 'string' ? body.postalCode : '',
+      paymentMethod,
+      items: body.items,
+      discountApplied: Boolean(body.discountApplied),
+      strictStock: false,
+    });
+
+    await recordCheckoutDraftAnalyticsAsync(
+      order,
+      typeof body.sessionId === 'string' ? body.sessionId : undefined
+    );
+
+    res.json({ ok: true, order });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Erro ao guardar pré-encomenda.';
+    res.status(400).json({ error: message });
+  }
+});
+
 app.post('/api/orders', async (req, res) => {
   try {
     const body = req.body ?? {};
@@ -215,6 +277,7 @@ app.post('/api/orders', async (req, res) => {
       : 'Contra-Reembolso';
 
     const order = await createOrderInStore({
+      draftOrderId: typeof body.draftOrderId === 'string' ? body.draftOrderId.trim() : undefined,
       customerName: body.customerName,
       customerEmail: body.customerEmail,
       customerPhone: body.customerPhone,
@@ -533,6 +596,28 @@ function sanitizeColorVariants(raw: unknown): ProductColorVariant[] {
   return result;
 }
 
+function sanitizeSizeMeasurementsInput(raw: unknown): ProductSizeMeasurement[] {
+  if (!Array.isArray(raw)) return [];
+  const result: ProductSizeMeasurement[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const obj = item as Record<string, unknown>;
+    const size = typeof obj.size === 'string' ? obj.size.trim().slice(0, 24) : '';
+    const width = typeof obj.width === 'string' ? obj.width.trim().slice(0, 24) : '';
+    const height = typeof obj.height === 'string' ? obj.height.trim().slice(0, 24) : '';
+    const waist = typeof obj.waist === 'string' ? obj.waist.trim().slice(0, 24) : '';
+    if (size && (width || height || waist)) {
+      result.push({
+        size,
+        ...(width ? { width } : {}),
+        ...(height ? { height } : {}),
+        ...(waist ? { waist } : {}),
+      });
+    }
+  }
+  return result;
+}
+
 app.post('/api/admin/products', requireAdminAuth, async (req, res) => {
   try {
     const body = req.body ?? {};
@@ -559,6 +644,7 @@ app.post('/api/admin/products', requireAdminAuth, async (req, res) => {
         : undefined;
 
     const colorVariants = sanitizeColorVariants(body.colorVariants);
+    const sizeMeasurements = sanitizeSizeMeasurementsInput(body.sizeMeasurements);
     const fallbackColors =
       Array.isArray(body.colors) && body.colors.length ? body.colors.map(String) : ['Neutro'];
 
@@ -570,6 +656,7 @@ app.post('/api/admin/products', requireAdminAuth, async (req, res) => {
       originalPrice,
       stock: Math.floor(stock),
       sizes: Array.isArray(body.sizes) && body.sizes.length ? body.sizes.map(String) : ['Único'],
+      sizeMeasurements,
       colors: colorVariants.length > 0 ? colorVariants.map((v) => v.name) : fallbackColors,
       colorVariants,
       description: typeof body.description === 'string' ? body.description.trim() : '',
@@ -605,6 +692,9 @@ app.patch('/api/admin/products/:id', requireAdminAuth, async (req, res) => {
       updates.stock = Math.floor(Number(body.stock));
     }
     if (Array.isArray(body.sizes)) updates.sizes = body.sizes.map(String);
+    if (Array.isArray(body.sizeMeasurements)) {
+      updates.sizeMeasurements = sanitizeSizeMeasurementsInput(body.sizeMeasurements);
+    }
     if (Array.isArray(body.colorVariants)) {
       const variants = sanitizeColorVariants(body.colorVariants);
       updates.colorVariants = variants;
@@ -621,6 +711,7 @@ app.patch('/api/admin/products/:id', requireAdminAuth, async (req, res) => {
     if (typeof body.description === 'string') updates.description = body.description.trim();
     if (typeof body.material === 'string') updates.material = body.material.trim();
     if (typeof body.image === 'string' && isSafeAssetUrl(body.image)) updates.image = body.image.trim();
+    if (body.featured !== undefined) updates.featured = Boolean(body.featured);
     if (body.isNew !== undefined) updates.isNew = Boolean(body.isNew);
     if (body.onSale !== undefined) updates.onSale = Boolean(body.onSale);
 
