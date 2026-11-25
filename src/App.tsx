@@ -1,6 +1,7 @@
-import React, { Suspense, lazy, useEffect, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { StoreProvider, useStore } from './context/StoreContext';
 import { Product, ProductCategory, StoreOrder } from './types/store';
+import { getCategoryParamFromLocation } from './utils/categoryLinks';
 import { StorefrontHeader } from './components/storefront/StorefrontHeader';
 import { StorefrontHero } from './components/storefront/StorefrontHero';
 import { ProductGrid } from './components/storefront/ProductGrid';
@@ -36,11 +37,13 @@ const LazyAdminRealtimeAnalytics = lazy(() =>
 const AppContent: React.FC = () => {
   const {
     activeAppView,
+    selectedCategory,
     setSelectedCategory,
     setSearchQuery,
     adminToken,
     cart,
     products,
+    isStoreLoaded,
     isCartOpen,
     quickViewProduct,
   } = useStore();
@@ -54,6 +57,27 @@ const AppContent: React.FC = () => {
   const [storeSearchOpen, setStoreSearchOpen] = useState(false);
   const [wishlistOnly, setWishlistOnly] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
+  const pendingDeepLinkScrollRef = useRef<boolean>(
+    Boolean(getCategoryParamFromLocation()) ||
+      (typeof window !== 'undefined' &&
+        (window.location.hash === '#catalog-grid' || window.location.hash === '#catalog'))
+  );
+
+  // Scroll straight to the target category grid when opened via a shared category link
+  useEffect(() => {
+    if (activeAppView !== 'storefront' || !isStoreLoaded || !pendingDeepLinkScrollRef.current) {
+      return;
+    }
+    pendingDeepLinkScrollRef.current = false;
+    const timer = window.setTimeout(() => {
+      const targetEl =
+        document.getElementById('catalog-grid') || document.getElementById('catalog');
+      if (targetEl) {
+        targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [activeAppView, isStoreLoaded, selectedCategory]);
 
   // Non-blocking immediate real-time visitor tracking on storefront mount
   useEffect(() => {
@@ -98,13 +122,29 @@ const AppContent: React.FC = () => {
     setWishlistOnly(false);
     if (category) {
       setSelectedCategory(category);
+      if (typeof window !== 'undefined') {
+        if (category === 'Todos' && getCategoryParamFromLocation()) {
+          window.history.replaceState(null, '', window.location.pathname);
+        } else if (category !== 'Todos') {
+          window.history.replaceState(
+            null,
+            '',
+            `${window.location.pathname}?categoria=${encodeURIComponent(category)}#catalog-grid`
+          );
+        }
+      }
     }
     requestAnimationFrame(() => {
       if (sectionId === 'top') {
         window.scrollTo({ top: 0, behavior: 'smooth' });
         return;
       }
-      const el = document.getElementById(sectionId);
+      const resolvedId =
+        sectionId === 'catalog' && category && category !== 'Todos'
+          ? 'catalog-grid'
+          : sectionId;
+      const el =
+        document.getElementById(resolvedId) || document.getElementById(sectionId);
       if (el) {
         el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }

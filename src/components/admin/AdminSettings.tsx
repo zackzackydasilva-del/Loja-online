@@ -3,6 +3,8 @@ import {
   ArrowDown,
   ArrowUp,
   Check,
+  Copy,
+  ExternalLink,
   LayoutTemplate,
   Lock,
   Plus,
@@ -23,6 +25,7 @@ import {
   StorefrontConfig,
 } from '../../types/store';
 import { formatMoney } from '../../utils/currency';
+import { buildCategoryUrl } from '../../utils/categoryLinks';
 import { ImageField } from './ImageField';
 
 type SettingsSection = 'geral' | 'banner' | 'destaques' | 'categorias' | 'catalogo_rodape';
@@ -92,6 +95,9 @@ export const AdminSettings: React.FC = () => {
     resetDemoData,
     adminManagedByEnv,
     changeAdminPassword,
+    setActiveAppView,
+    setSelectedCategory,
+    setSearchQuery,
   } = useStore();
 
   const [section, setSection] = useState<SettingsSection>('geral');
@@ -110,6 +116,7 @@ export const AdminSettings: React.FC = () => {
   const [hasUnsaved, setHasUnsaved] = useState(false);
   const hasUnsavedChangesRef = useRef(false);
   const [categoryRenames, setCategoryRenames] = useState<Record<string, string>>({});
+  const [copiedCategoryKey, setCopiedCategoryKey] = useState<string | null>(null);
 
   const [newChannelName, setNewChannelName] = useState('');
   const [newChannelRole, setNewChannelRole] = useState('');
@@ -196,7 +203,11 @@ export const AdminSettings: React.FC = () => {
         cleanedCategoryStrip.length > 0
           ? cleanedCategoryStrip
           : DEFAULT_STOREFRONT_CONFIG.categoryStripItems,
-      highlights: (nextSf.highlights || []).slice(0, MAX_HIGHLIGHTS),
+      highlights: (nextSf.highlights || []).slice(0, MAX_HIGHLIGHTS).map((hl) => ({
+        ...hl,
+        productId: '',
+        targetCategory: hl.targetCategory?.trim() || 'Todos',
+      })),
     };
 
     const activeRenamesMap = renamesOverride ?? categoryRenames;
@@ -1181,14 +1192,17 @@ export const AdminSettings: React.FC = () => {
 
         const addHighlight = () => {
           if (highlights.length >= MAX_HIGHLIGHTS) return;
+          const nonSaleCats = (sf.categoryStripItems || [])
+            .filter((c) => !c.isSale && c.category?.trim())
+            .map((c) => c.category.trim());
           const nextItem: HighlightCardConfig = {
             id: `hl-${Date.now()}`,
             badge: 'Destaque',
             title: 'Novo Destaque da Semana',
             subtitle: 'Seleção exclusiva disponível agora na loja.',
-            ctaText: 'Ver Destaque',
+            ctaText: 'Ver Categoria',
             image: '',
-            targetCategory: dynamicCategoryOptions[1] || 'Todos',
+            targetCategory: nonSaleCats[0] || dynamicCategoryOptions[1] || 'Todos',
             productId: '',
           };
           updateSfDraft({ ...sf, highlights: [...highlights, nextItem].slice(0, MAX_HIGHLIGHTS) });
@@ -1224,7 +1238,7 @@ export const AdminSettings: React.FC = () => {
                     Destaques da Vitrine ({highlights.length}/{MAX_HIGHLIGHTS})
                   </h3>
                   <p className="text-[11px] text-[#72726E] mt-0.5">
-                    Coloque até 4 destaques. Na loja aparecem em carrossel por baixo de &ldquo;As Nossas Escolhas Favoritas&rdquo;, alternando a cada 2 segundos com foto completa e detalhes na borda inferior escura.
+                    Coloque até 4 destaques. Na loja aparecem em formato circular com rolagem contínua por baixo de &ldquo;As Nossas Escolhas Favoritas&rdquo; e cada destaque direciona diretamente para uma categoria.
                   </p>
                 </div>
                 <button
@@ -1346,82 +1360,26 @@ export const AdminSettings: React.FC = () => {
                           />
                         </div>
 
-                        <div className="sm:col-span-2 space-y-2.5 pt-1">
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <label className="block text-[11px] font-medium text-[#555552]">
-                              Ao clicar no destaque na loja:
-                            </label>
-                            <div className="inline-flex rounded-full bg-white p-0.5 border border-black/10">
-                              <button
-                                type="button"
-                                onClick={() => updateHighlightAt(idx, { productId: '' })}
-                                className={`px-3 py-1 rounded-full text-[11px] font-medium transition-colors cursor-pointer ${
-                                  !hl.productId
-                                    ? 'bg-[#1C1C1E] text-white'
-                                    : 'text-[#555552] hover:text-[#1C1C1E]'
-                                }`}
-                              >
-                                Ir para Categoria
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  updateHighlightAt(idx, {
-                                    productId: hl.productId || products[0]?.id || '',
-                                  })
-                                }
-                                className={`px-3 py-1 rounded-full text-[11px] font-medium transition-colors cursor-pointer ${
-                                  hl.productId
-                                    ? 'bg-[#1C1C1E] text-white'
-                                    : 'text-[#555552] hover:text-[#1C1C1E]'
-                                }`}
-                              >
-                                Abrir Produto
-                              </button>
-                            </div>
-                          </div>
-
-                          {!hl.productId ? (
-                            <div>
-                              <label className="block text-[11px] font-medium text-[#555552] mb-1">
-                                Categoria Conectada (vai direto para esta categoria ao clicar)
-                              </label>
-                              <select
-                                value={hl.targetCategory || 'Todos'}
-                                onChange={(e) =>
-                                  updateHighlightAt(idx, {
-                                    targetCategory: e.target.value as ProductCategory | 'Todos',
-                                    productId: '',
-                                  })
-                                }
-                                className="w-full bg-white border border-black/15 rounded-xl px-3 py-2 text-xs font-medium text-[#1C1C1E] focus:outline-none focus:border-[#1C1C1E]"
-                              >
-                                {dynamicCategoryOptions.map((cat) => (
-                                  <option key={cat} value={cat}>
-                                    {cat === 'Todos' ? 'Todos os Produtos' : cat}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                          ) : (
-                            <div>
-                              <label className="block text-[11px] font-medium text-[#555552] mb-1">
-                                Produto Conectado
-                              </label>
-                              <select
-                                value={hl.productId || ''}
-                                onChange={(e) => updateHighlightAt(idx, { productId: e.target.value })}
-                                className="w-full bg-white border border-black/15 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#1C1C1E]"
-                              >
-                                <option value="">Selecionar categoria em vez de produto</option>
-                                {products.map((p) => (
-                                  <option key={p.id} value={p.id}>
-                                    {p.name} ({formatMoney(p.price, settings.currencySymbol)})
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                          )}
+                        <div className="sm:col-span-2 pt-1">
+                          <label className="block text-[11px] font-medium text-[#555552] mb-1">
+                            Categoria de Destino (ao clicar no destaque na loja, direciona para esta categoria)
+                          </label>
+                          <select
+                            value={hl.targetCategory || 'Todos'}
+                            onChange={(e) =>
+                              updateHighlightAt(idx, {
+                                targetCategory: e.target.value as ProductCategory | 'Todos',
+                                productId: '',
+                              })
+                            }
+                            className="w-full bg-white border border-black/15 rounded-xl px-3 py-2 text-xs font-medium text-[#1C1C1E] focus:outline-none focus:border-[#1C1C1E]"
+                          >
+                            {dynamicCategoryOptions.map((cat) => (
+                              <option key={cat} value={cat}>
+                                {cat === 'Todos' ? 'Todos os Produtos' : cat}
+                              </option>
+                            ))}
+                          </select>
                         </div>
                       </div>
 
@@ -1614,8 +1572,91 @@ export const AdminSettings: React.FC = () => {
 
         const removeCategory = (idx: number) => {
           if (categories.length <= 1) return;
+          const removedCat = categories[idx];
           const filtered = categories.filter((_, i) => i !== idx);
-          void persistStorefrontDraft({ ...sf, categoryStripItems: filtered });
+          const fallbackCategory =
+            filtered.find((c) => !c.isSale && c.category?.trim())?.category.trim() ||
+            filtered[0]?.category.trim() ||
+            'Mulher';
+
+          const removedName = removedCat?.category?.trim();
+          const nextRenames = { ...categoryRenames };
+          let nextEditorial = sf.editorialCards;
+          let nextPromo = sf.promoBanners;
+          let nextHighlights = sf.highlights;
+          let nextBottom = sf.bottomBanner;
+
+          if (removedName && fallbackCategory && removedName !== fallbackCategory) {
+            nextRenames[removedName] = fallbackCategory;
+            nextEditorial = sf.editorialCards.map((c) =>
+              c.category === removedName ? { ...c, category: fallbackCategory } : c
+            );
+            nextPromo = sf.promoBanners.map((b) =>
+              b.targetCategory === removedName ? { ...b, targetCategory: fallbackCategory } : b
+            );
+            nextHighlights = (sf.highlights || []).map((h) =>
+              h.targetCategory === removedName ? { ...h, targetCategory: fallbackCategory } : h
+            );
+            if (sf.bottomBanner && sf.bottomBanner.targetCategory === removedName) {
+              nextBottom = { ...sf.bottomBanner, targetCategory: fallbackCategory };
+            }
+          }
+
+          void persistStorefrontDraft(
+            {
+              ...sf,
+              categoryStripItems: filtered,
+              editorialCards: nextEditorial,
+              promoBanners: nextPromo,
+              highlights: nextHighlights,
+              bottomBanner: nextBottom,
+            },
+            nextRenames
+          );
+        };
+
+        const copyCategoryLink = async (categoryName: string, key: string) => {
+          const shareUrl = buildCategoryUrl(categoryName);
+          try {
+            await navigator.clipboard.writeText(shareUrl);
+          } catch {
+            const textarea = document.createElement('textarea');
+            textarea.value = shareUrl;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.focus();
+            textarea.select();
+            try {
+              document.execCommand('copy');
+            } finally {
+              document.body.removeChild(textarea);
+            }
+          }
+          setCopiedCategoryKey(key);
+          window.setTimeout(() => {
+            setCopiedCategoryKey((curr) => (curr === key ? null : curr));
+          }, 2500);
+        };
+
+        const openCategoryInStore = (categoryName: string) => {
+          setSearchQuery('');
+          setSelectedCategory(categoryName);
+          if (typeof window !== 'undefined') {
+            window.history.replaceState(
+              null,
+              '',
+              `${window.location.pathname}?categoria=${encodeURIComponent(categoryName)}#catalog-grid`
+            );
+          }
+          setActiveAppView('storefront');
+          window.setTimeout(() => {
+            const el =
+              document.getElementById('catalog-grid') || document.getElementById('catalog');
+            if (el) {
+              el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+          }, 120);
         };
 
         return (
@@ -1626,7 +1667,7 @@ export const AdminSettings: React.FC = () => {
                   Gerir Categorias da Loja ({categories.length})
                 </h3>
                 <p className="text-[11px] text-[#72726E] mt-0.5">
-                  Edite nomes, imagens, ordem ou crie novas categorias. As alterações refletem-se nos filtros do catálogo, na barra da loja e no formulário de produtos.
+                  Edite nomes, imagens, ordem, copie o link direto de cada categoria ou crie novas categorias. Todos os produtos pertencem a uma categoria ativa.
                 </p>
               </div>
               <button
@@ -1644,6 +1685,9 @@ export const AdminSettings: React.FC = () => {
                 const matchingCount = products.filter(
                   (p) => p.category === catItem.category
                 ).length;
+                const copyKey = `${idx}-${catItem.category}`;
+                const isCopied = copiedCategoryKey === copyKey;
+                const shareUrl = buildCategoryUrl(catItem.category);
 
                 return (
                   <div
@@ -1705,6 +1749,48 @@ export const AdminSettings: React.FC = () => {
                         placeholder="Ex: Vestidos, Calças, Acessórios..."
                         className="w-full bg-white border border-black/15 rounded-xl px-3 py-2 text-xs font-medium text-[#1C1C1E] focus:outline-none focus:border-[#1C1C1E]"
                       />
+                    </div>
+
+                    {/* Link direto da categoria */}
+                    <div className="rounded-xl bg-white border border-black/8 px-3 py-2 flex items-center justify-between gap-2">
+                      <span
+                        title={shareUrl}
+                        className="text-[11px] font-mono text-[#555552] truncate min-w-0 flex-1"
+                      >
+                        ?categoria={encodeURIComponent(catItem.category)}
+                      </span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => copyCategoryLink(catItem.category, copyKey)}
+                          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors cursor-pointer ${
+                            isCopied
+                              ? 'bg-emerald-600 text-white'
+                              : 'bg-[#1C1C1E] text-white hover:bg-[#323235]'
+                          }`}
+                        >
+                          {isCopied ? (
+                            <>
+                              <Check className="w-3 h-3" />
+                              <span>Copiado</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3 h-3" />
+                              <span>Copiar Link</span>
+                            </>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openCategoryInStore(catItem.category)}
+                          title={`Abrir categoria ${catItem.label} na loja`}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#F3F3F0] hover:bg-[#E5E4DF] text-[#1C1C1E] text-[11px] font-medium transition-colors cursor-pointer"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          <span>Abrir</span>
+                        </button>
+                      </div>
                     </div>
 
                     <label className="inline-flex items-center gap-2 text-xs text-[#1C1C1E] cursor-pointer">

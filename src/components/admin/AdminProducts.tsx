@@ -115,7 +115,11 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                         </div>
                       </td>
                       <td className="py-3 px-4 font-mono text-xs text-[#555552]">{product.sku}</td>
-                      <td className="py-3 px-4 text-[#555552]">{product.category}</td>
+                      <td className="py-3 px-4">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-[#F2F1EE] text-[#1C1C1E] text-xs font-medium">
+                          {product.category || 'Sem categoria'}
+                        </span>
+                      </td>
                       <td className="py-3 px-4 text-center">
                         <button
                           type="button"

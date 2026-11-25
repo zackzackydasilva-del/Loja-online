@@ -629,7 +629,7 @@ app.post('/api/admin/products', requireAdminAuth, async (req, res) => {
     const image = typeof body.image === 'string' ? body.image.trim() : '';
 
     if (!name || !sku || !category || !Number.isFinite(price) || price <= 0 || !Number.isFinite(stock) || stock < 0) {
-      res.status(400).json({ error: 'Preencha nome, SKU, categoria, preço (> 0) e stock (>= 0) válidos.' });
+      res.status(400).json({ error: 'Todos os produtos devem pertencer a uma categoria. Preencha nome, SKU, categoria, preço (> 0) e stock (>= 0) válidos.' });
       return;
     }
 
@@ -679,7 +679,14 @@ app.patch('/api/admin/products/:id', requireAdminAuth, async (req, res) => {
     const updates: Record<string, unknown> = {};
     if (typeof body.name === 'string' && body.name.trim()) updates.name = body.name.trim();
     if (typeof body.sku === 'string' && body.sku.trim()) updates.sku = body.sku.trim();
-    if (typeof body.category === 'string' && body.category.trim()) updates.category = body.category.trim();
+    if ('category' in body) {
+      const cleanCategory = typeof body.category === 'string' ? body.category.trim() : '';
+      if (!cleanCategory) {
+        res.status(400).json({ error: 'Todos os produtos devem pertencer a uma categoria.' });
+        return;
+      }
+      updates.category = cleanCategory;
+    }
     if (body.price !== undefined && Number.isFinite(Number(body.price)) && Number(body.price) > 0) {
       updates.price = Number(body.price);
     }
@@ -897,8 +904,11 @@ app.patch('/api/admin/settings', requireAdminAuth, async (req, res) => {
           .slice(0, 4)
           .map((h: any) => {
             const rawImg = typeof h.image === 'string' ? h.image.trim() : '';
+            const rawCat = typeof h.targetCategory === 'string' ? h.targetCategory.trim() : '';
             return {
               ...h,
+              productId: '',
+              targetCategory: rawCat || 'Todos',
               image: rawImg === '' || !isSafeAssetUrl(rawImg) ? '' : rawImg,
             };
           });

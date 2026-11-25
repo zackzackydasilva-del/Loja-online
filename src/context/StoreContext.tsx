@@ -21,6 +21,10 @@ import {
   WEEKLY_SALES_DATA,
 } from '../data/seedData';
 import { getVisitorSessionId } from '../utils/storeTracker';
+import {
+  getCategoryParamFromLocation,
+  resolveCategoryFromParam,
+} from '../utils/categoryLinks';
 
 const CART_STORAGE_KEY = 'lunora_cart_v2';
 const WISHLIST_STORAGE_KEY = 'lunora_wishlist_v2';
@@ -226,7 +230,17 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   });
 
   const [activeAppView, setActiveAppView] = useState<'storefront' | 'admin'>('storefront');
-  const [selectedCategory, setSelectedCategory] = useState<ProductCategory | 'Todos'>('Todos');
+  const [selectedCategory, setSelectedCategory] = useState<ProductCategory | 'Todos'>(() => {
+    const param = getCategoryParamFromLocation();
+    if (!param) return 'Todos';
+    return (
+      resolveCategoryFromParam(
+        param,
+        initialCache?.settings?.storefrontConfig?.categoryStripItems,
+        initialCache?.products?.map((p) => p.category)
+      ) || param
+    );
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [quickViewProduct, setQuickViewProduct] = useState<Product | null>(null);
@@ -269,6 +283,27 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // Ignore storage write errors
     }
   }, [wishlist]);
+
+  useEffect(() => {
+    const syncCategoryFromUrl = () => {
+      const param = getCategoryParamFromLocation();
+      if (!param) return;
+      const resolved = resolveCategoryFromParam(
+        param,
+        settings.storefrontConfig?.categoryStripItems,
+        products.map((p) => p.category)
+      );
+      if (resolved) {
+        setSelectedCategory(resolved);
+      }
+    };
+
+    syncCategoryFromUrl();
+    window.addEventListener('popstate', syncCategoryFromUrl);
+    return () => {
+      window.removeEventListener('popstate', syncCategoryFromUrl);
+    };
+  }, [settings.storefrontConfig?.categoryStripItems, products]);
 
   useEffect(() => {
     if (settings.storeName) {

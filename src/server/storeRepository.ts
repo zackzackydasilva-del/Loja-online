@@ -118,7 +118,16 @@ function mergeStorefrontConfig(raw: unknown): StorefrontConfig {
           ? obj.bottomBanner.slides
           : DEFAULT_STOREFRONT_CONFIG.bottomBanner!.slides,
     },
-    highlights: Array.isArray(obj.highlights) ? obj.highlights.slice(0, 4) : [],
+    highlights: Array.isArray(obj.highlights)
+      ? obj.highlights.slice(0, 4).map((h) => ({
+          ...h,
+          productId: '',
+          targetCategory:
+            typeof h?.targetCategory === 'string' && h.targetCategory.trim()
+              ? h.targetCategory.trim()
+              : 'Todos',
+        }))
+      : [],
     guarantees:
       Array.isArray(obj.guarantees) && obj.guarantees.length > 0
         ? obj.guarantees
@@ -707,7 +716,7 @@ function mapProductFromRow(row: Record<string, unknown>): Product {
     id: String(row.id),
     sku: String(row.sku),
     name: String(row.name),
-    category: String(row.category) as ProductCategory,
+    category: (String(row.category ?? '').trim() || 'Mulher') as ProductCategory,
     price: Number(row.price),
     originalPrice: row.original_price != null ? Number(row.original_price) : undefined,
     rating: Number(row.rating ?? 5.0),
@@ -2402,11 +2411,16 @@ export async function deleteOrderInStore(orderId: string) {
 export async function createProductInStore(
   product: Omit<Product, 'id' | 'rating' | 'reviewCount'>
 ): Promise<Product> {
+  const cleanCategory = String(product.category || '').trim();
+  if (!cleanCategory) {
+    throw new Error('Todos os produtos devem pertencer a uma categoria.');
+  }
   const uniqueSuffix = Math.floor(Math.random() * 1000)
     .toString()
     .padStart(3, '0');
   const created: Product = {
     ...product,
+    category: cleanCategory as ProductCategory,
     id: `prod-${Date.now()}-${uniqueSuffix}`,
     rating: 5.0,
     reviewCount: 1,
@@ -2484,6 +2498,13 @@ export async function createProductInStore(
 }
 
 export async function updateProductInStore(id: string, updates: Partial<Product>) {
+  if ('category' in updates) {
+    const cleanCat = String(updates.category || '').trim();
+    if (!cleanCat) {
+      throw new Error('Todos os produtos devem pertencer a uma categoria.');
+    }
+    updates = { ...updates, category: cleanCat as ProductCategory };
+  }
   const supabase = getSupabaseClient();
   assertPersistenceAvailable(supabase);
   if (supabase) {
@@ -2861,11 +2882,19 @@ export async function updateSettingsInStore(
           }))
         );
       }
-      merged.highlights = (merged.highlights || []).slice(0, 4);
+      merged.highlights = (merged.highlights || []).slice(0, 4).map((h) => ({
+        ...h,
+        productId: '',
+        targetCategory:
+          typeof h.targetCategory === 'string' && h.targetCategory.trim()
+            ? h.targetCategory.trim()
+            : 'Todos',
+      }));
       if (merged.highlights.length > 0) {
         merged.highlights = await Promise.all(
           merged.highlights.map(async (h) => ({
             ...h,
+            productId: '',
             image: h.image ? await persistImageAsset(supabase, h.image, 'banners') : '',
           }))
         );

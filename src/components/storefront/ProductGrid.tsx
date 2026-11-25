@@ -71,7 +71,7 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
 
   const highlightsRepeatPerHalf = useMemo(() => {
     if (highlightsList.length === 0) return 0;
-    return Math.max(1, Math.ceil(5 / highlightsList.length));
+    return Math.max(1, Math.ceil(8 / highlightsList.length));
   }, [highlightsList.length]);
 
   useEffect(() => {
@@ -451,13 +451,10 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
               <div
                 key={halfIdx}
                 aria-hidden={halfIdx === 1}
-                className="flex items-start gap-4 sm:gap-5 pr-4 sm:pr-5 shrink-0"
+                className="flex items-start gap-5 sm:gap-7 pr-5 sm:pr-7 shrink-0"
               >
                 {Array.from({ length: highlightsRepeatPerHalf }).flatMap((_, repIdx) =>
                   highlightsList.map((hl) => {
-                    const linkedProduct = hl.productId
-                      ? products.find((p) => p.id === hl.productId)
-                      : undefined;
                     const hasImg = Boolean(hl.image && hl.image.trim());
 
                     return (
@@ -465,58 +462,36 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
                         key={`${halfIdx}-${repIdx}-${hl.id}`}
                         onClick={() => {
                           if (didDragHighlightsRef.current) return;
-                          if (linkedProduct) {
-                            setQuickViewProduct(linkedProduct);
-                          } else {
-                            if (wishlistOnly) onResetView();
-                            if (searchQuery) setSearchQuery('');
-                            setSelectedCategory(hl.targetCategory || 'Todos');
-                            window.setTimeout(() => {
-                              catalogSectionRef.current?.scrollIntoView({
-                                behavior: 'smooth',
-                                block: 'start',
-                              });
-                            }, 60);
-                          }
+                          if (wishlistOnly) onResetView();
+                          if (searchQuery) setSearchQuery('');
+                          setSelectedCategory(hl.targetCategory || 'Todos');
+                          window.setTimeout(() => {
+                            catalogSectionRef.current?.scrollIntoView({
+                              behavior: 'smooth',
+                              block: 'start',
+                            });
+                          }, 60);
                         }}
-                        className={`group relative w-[240px] sm:w-[290px] lg:w-[320px] shrink-0 rounded-[18px] sm:rounded-[22px] overflow-hidden bg-[#09090B] text-white cursor-pointer pb-10 sm:pb-11 transition-transform duration-200 hover:-translate-y-0.5 ${
-                          hasImg ? '' : 'min-h-[210px] sm:min-h-[240px]'
-                        }`}
+                        className="group flex flex-col items-center text-center w-[148px] sm:w-[176px] lg:w-[196px] shrink-0 cursor-pointer pt-1"
                       >
-                        {hasImg ? (
-                          <SafeImage
-                            src={hl.image}
-                            alt={hl.title}
-                            draggable={false}
-                            className="w-full h-auto block pointer-events-none"
-                          />
-                        ) : null}
-
-                        {/* Sobreposição do título do destaque + descrição e ação na borda inferior escura */}
-                        <div className="absolute inset-x-0 bottom-0 pt-5 sm:pt-6 pb-2.5 sm:pb-3 px-3 sm:px-4 bg-gradient-to-t from-[#09090B] via-[#09090B]/70 to-transparent flex items-end justify-between gap-2">
-                          <div className="space-y-0.5 min-w-0 flex-1">
-                            {hl.badge && (
-                              <span className="inline-block px-2 py-0.5 rounded-full bg-white/15 backdrop-blur-xs text-white text-[8px] sm:text-[9px] font-semibold tracking-wide uppercase">
-                                {hl.badge}
-                              </span>
-                            )}
-                            <h3 className="text-xs sm:text-sm font-semibold leading-tight text-white line-clamp-1">
-                              {hl.title}
-                            </h3>
-                            {hl.subtitle && (
-                              <p className="text-[10px] sm:text-[11px] text-white/80 leading-snug line-clamp-1">
-                                {hl.subtitle}
-                              </p>
-                            )}
-                          </div>
-
-                          <div className="shrink-0">
-                            <span className="inline-flex items-center gap-0.5 px-2.5 py-1 sm:py-1.5 rounded-full bg-white text-[#111111] text-[10px] font-semibold shadow-sm group-hover:bg-neutral-100 transition-colors whitespace-nowrap">
-                              <span>{hl.ctaText || 'Ver'}</span>
-                              <ChevronRight className="w-3 h-3" />
+                        <div className="w-[140px] h-[140px] sm:w-[168px] sm:h-[168px] lg:w-[188px] lg:h-[188px] rounded-full overflow-hidden bg-[#EFEFEF] ring-1 ring-black/10 group-hover:ring-black/30 shadow-sm transition-all duration-200 group-hover:-translate-y-0.5 flex items-center justify-center">
+                          {hasImg ? (
+                            <SafeImage
+                              src={hl.image}
+                              alt={hl.title}
+                              draggable={false}
+                              className="w-full h-full object-cover object-center pointer-events-none transition-transform duration-300 group-hover:scale-105"
+                            />
+                          ) : (
+                            <span className="text-lg font-serif font-semibold text-[#555555]">
+                              {hl.title.slice(0, 2).toUpperCase()}
                             </span>
-                          </div>
+                          )}
                         </div>
+
+                        <h3 className="mt-2.5 sm:mt-3 px-1 text-xs sm:text-sm font-semibold leading-snug text-[#111111] line-clamp-2 group-hover:underline decoration-black/40 underline-offset-4">
+                          {hl.title}
+                        </h3>
                       </article>
                     );
                   })
@@ -528,7 +503,7 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
       )}
 
       {/* FILTERABLE CATALOG GRID SECTION */}
-      <div ref={catalogSectionRef} className="space-y-4 scroll-mt-24">
+      <div id="catalog-grid" ref={catalogSectionRef} className="space-y-4 scroll-mt-24">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 overflow-x-auto pb-1">
             {filterTabs.map((cat) => {

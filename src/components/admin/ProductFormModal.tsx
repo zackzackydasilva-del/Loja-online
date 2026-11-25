@@ -28,7 +28,15 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     const nonSale = strip
       .filter((c) => !c.isSale && c.category?.trim())
       .map((c) => c.category.trim());
-    const base = nonSale.length > 0 ? nonSale : DEFAULT_PRODUCT_CATEGORIES;
+    const allStrip = strip
+      .filter((c) => c.category?.trim())
+      .map((c) => c.category.trim());
+    const base =
+      nonSale.length > 0
+        ? nonSale
+        : allStrip.length > 0
+        ? allStrip
+        : DEFAULT_PRODUCT_CATEGORIES;
     const set = new Set(base);
     if (editingProduct?.category?.trim()) {
       set.add(editingProduct.category.trim());
@@ -58,7 +66,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     if (editingProduct) {
       setName(editingProduct.name);
       setSku(editingProduct.sku);
-      setCategory(editingProduct.category);
+      setCategory(editingProduct.category?.trim() || availableCategories[0] || 'Mulher');
       setPrice(String(editingProduct.price));
       setOriginalPrice(editingProduct.originalPrice ? String(editingProduct.originalPrice) : '');
       setStock(String(editingProduct.stock));
@@ -163,10 +171,16 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       })
       .filter((x): x is ProductSizeMeasurement => x !== null);
 
+    const cleanCategory = String(category || '').trim() || availableCategories[0] || '';
+    if (!cleanCategory) {
+      setErrorMsg('Todos os produtos devem pertencer a uma categoria.');
+      return;
+    }
+
     const payload = {
       name: name.trim(),
       sku: sku.trim(),
-      category,
+      category: cleanCategory,
       price: parsedPrice,
       originalPrice: parsedOrig && parsedOrig > parsedPrice ? parsedOrig : undefined,
       onSale: Boolean(parsedOrig && parsedOrig > parsedPrice),
@@ -235,9 +249,12 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-[#555552] mb-1">Categoria</label>
+            <label className="block text-xs font-medium text-[#555552] mb-1">
+              Categoria <span className="text-red-600">*</span>
+            </label>
             <select
-              value={category}
+              required
+              value={availableCategories.includes(category) ? category : availableCategories[0] || ''}
               onChange={(e) => setCategory(e.target.value as ProductCategory)}
               className="w-full border border-black/15 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-[#1C1C1E]"
             >
