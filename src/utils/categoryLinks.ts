@@ -87,3 +87,29 @@ export function resolveCategoryFromParam(
 
   return clean;
 }
+
+export function buildProductUrl(productId: string): string {
+  const clean = productId.trim();
+  if (typeof window === 'undefined') {
+    return `/?produto=${encodeURIComponent(clean)}`;
+  }
+  const base = `${window.location.origin}${window.location.pathname}`;
+  return `${base}?produto=${encodeURIComponent(clean)}`;
+}
+
+export function getProductParamFromLocation(url?: string): string | null {
+  try {
+    const search = url
+      ? new URL(url, typeof window !== 'undefined' ? window.location.origin : 'https://lunora.local').search
+      : typeof window !== 'undefined'
+      ? window.location.search
+      : '';
+    if (!search) return null;
+    const params = new URLSearchParams(search);
+    const raw = params.get('produto') || params.get('product');
+    return raw && raw.trim() ? raw.trim() : null;
+  } catch {
+    return null;
+  }
+}
+

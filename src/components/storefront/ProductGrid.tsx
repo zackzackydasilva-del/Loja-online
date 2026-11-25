@@ -161,24 +161,32 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
   }, [products, wishlist]);
 
   const filteredProducts = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
+    const normalizeText = (val: string) =>
+      val
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim();
+
+    const query = normalizeText(searchQuery);
+    const terms = query ? query.split(/\s+/).filter(Boolean) : [];
     const list = products.filter((p) => {
       if (wishlistOnly && !wishlist.includes(p.id)) {
         return false;
       }
 
       const matchesCat =
-        selectedCategory === 'Todos'
+        terms.length > 0 || selectedCategory === 'Todos'
           ? true
           : saleCategoryNames.has(selectedCategory)
           ? Boolean(p.onSale || p.originalPrice || p.category === selectedCategory)
           : p.category === selectedCategory;
 
+      const haystack = normalizeText(
+        [p.name, p.category, p.description, p.material, p.sku, ...(p.colors || [])].join(' ')
+      );
       const matchesSearch =
-        !query ||
-        p.name.toLowerCase().includes(query) ||
-        p.category.toLowerCase().includes(query) ||
-        p.description.toLowerCase().includes(query);
+        terms.length === 0 || terms.every((term) => haystack.includes(term));
 
       return matchesCat && matchesSearch;
     });
@@ -548,6 +556,24 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
             </div>
           )}
         </div>
+
+        {searchQuery.trim() && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-[#F5F4F0] px-4 py-2.5 text-xs">
+            <span className="text-[#111111]">
+              Resultados da pesquisa para{' '}
+              <strong className="font-semibold">&ldquo;{searchQuery.trim()}&rdquo;</strong> (
+              {filteredProducts.length}{' '}
+              {filteredProducts.length === 1 ? 'produto' : 'produtos'})
+            </span>
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="font-medium text-[#555555] hover:text-[#111111] underline underline-offset-4 cursor-pointer"
+            >
+              Limpar pesquisa
+            </button>
+          </div>
+        )}
 
         {wishlistOnly && (
           <div className="flex items-center justify-between">

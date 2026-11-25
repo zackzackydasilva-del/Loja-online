@@ -195,6 +195,17 @@ export interface HighlightCardConfig {
   productId?: string;
 }
 
+export interface StorePopupConfig {
+  enabled: boolean;
+  badge: string;
+  title: string;
+  subtitle: string;
+  image: string;
+  ctaText: string;
+  productId?: string;
+  buttonUrl?: string;
+}
+
 export interface StorefrontConfig {
   topNoticeText?: string;
   headerWordmark: string;
@@ -221,6 +232,8 @@ export interface StorefrontConfig {
   promoBanners: PromoBannerConfig[];
   bottomBanner?: BottomBannerConfig;
   highlights?: HighlightCardConfig[];
+  entryPopup?: StorePopupConfig;
+  postCheckoutPopup?: StorePopupConfig;
   catalogEyebrow: string;
   catalogTitle: string;
   guarantees: TrustBadgeConfig[];

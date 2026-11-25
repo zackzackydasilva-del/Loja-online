@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowDown,
   ArrowUp,
+  Bell,
   Check,
   Copy,
   ExternalLink,
@@ -22,13 +23,20 @@ import {
   CategoryStripItemConfig,
   HighlightCardConfig,
   ProductCategory,
+  StorePopupConfig,
   StorefrontConfig,
 } from '../../types/store';
 import { formatMoney } from '../../utils/currency';
-import { buildCategoryUrl } from '../../utils/categoryLinks';
+import { buildCategoryUrl, buildProductUrl } from '../../utils/categoryLinks';
 import { ImageField } from './ImageField';
 
-type SettingsSection = 'geral' | 'banner' | 'destaques' | 'categorias' | 'catalogo_rodape';
+type SettingsSection =
+  | 'geral'
+  | 'banner'
+  | 'destaques'
+  | 'categorias'
+  | 'popups'
+  | 'catalogo_rodape';
 
 const MAX_HIGHLIGHTS = 4;
 
@@ -69,6 +77,14 @@ function mergeStorefrontConfig(cfg?: Partial<StorefrontConfig>): StorefrontConfi
           : DEFAULT_STOREFRONT_CONFIG.bottomBanner!.slides,
     },
     highlights: Array.isArray(cfg?.highlights) ? cfg.highlights.slice(0, MAX_HIGHLIGHTS) : [],
+    entryPopup: {
+      ...DEFAULT_STOREFRONT_CONFIG.entryPopup!,
+      ...(cfg?.entryPopup || {}),
+    },
+    postCheckoutPopup: {
+      ...DEFAULT_STOREFRONT_CONFIG.postCheckoutPopup!,
+      ...(cfg?.postCheckoutPopup || {}),
+    },
     guarantees:
       cfg?.guarantees && cfg.guarantees.length > 0
         ? cfg.guarantees
@@ -117,6 +133,7 @@ export const AdminSettings: React.FC = () => {
   const hasUnsavedChangesRef = useRef(false);
   const [categoryRenames, setCategoryRenames] = useState<Record<string, string>>({});
   const [copiedCategoryKey, setCopiedCategoryKey] = useState<string | null>(null);
+  const [copiedPopupLinkKey, setCopiedPopupLinkKey] = useState<'entry' | 'postCheckout' | null>(null);
 
   const [newChannelName, setNewChannelName] = useState('');
   const [newChannelRole, setNewChannelRole] = useState('');
@@ -228,6 +245,11 @@ export const AdminSettings: React.FC = () => {
         storefrontConfig: preparedSf,
         categoryRenames: renameEntries,
       });
+      try {
+        sessionStorage.removeItem('lunora_entry_popup_seen_sig');
+      } catch {
+        // Ignore storage error
+      }
       hasUnsavedChangesRef.current = false;
       setHasUnsaved(false);
       setCategoryRenames({});
@@ -301,6 +323,7 @@ export const AdminSettings: React.FC = () => {
     { id: 'banner', label: 'Banners da Loja (Topo & Rodapé)', icon: Sparkles },
     { id: 'destaques', label: 'Destaques', icon: Star },
     { id: 'categorias', label: 'Categorias', icon: Tag },
+    { id: 'popups', label: 'Popups & Notificações', icon: Bell },
     { id: 'catalogo_rodape', label: 'Catálogo, Código Promo & Rodapé', icon: LayoutTemplate },
   ];
 
@@ -1995,6 +2018,238 @@ export const AdminSettings: React.FC = () => {
                 {saving ? 'A guardar...' : 'Guardar Catálogo & Rodapé'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {/* SECTION 5: POPUPS & NOTIFICAÇÕES */}
+      {section === 'popups' && (
+        <div className="space-y-5">
+          <div className="bg-white rounded-[24px] p-6 border border-black/5 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-base font-semibold text-[#1C1C1E]">
+                Popups & Notificações da Loja
+              </h3>
+              <p className="text-xs text-[#72726E] mt-1">
+                Ative banners popup para quem entra na loja e para quem conclui a encomenda após a fatura, com links diretos para produtos nos botões.
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => handleSaveAll()}
+              className="px-5 py-2.5 bg-[#1C1C1E] text-white text-xs font-medium rounded-full hover:bg-[#323235] disabled:opacity-60 cursor-pointer whitespace-nowrap shrink-0"
+            >
+              {saving ? 'A guardar...' : 'Guardar Popups & Notificações'}
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
+            {(
+              [
+                {
+                  key: 'entry' as const,
+                  field: 'entryPopup' as const,
+                  heading: 'Popup de Entrada na Loja',
+                  description:
+                    'Aparece automaticamente apenas para quem entra na loja (não aparece na Gestão).',
+                  fallback: DEFAULT_STOREFRONT_CONFIG.entryPopup!,
+                },
+                {
+                  key: 'postCheckout' as const,
+                  field: 'postCheckoutPopup' as const,
+                  heading: 'Popup Pós-Fatura (Após Confirmar Encomenda)',
+                  description:
+                    'Aparece automaticamente depois da fatura quando o cliente preenche o check-out e clica em "Confirmar Encomenda".',
+                  fallback: DEFAULT_STOREFRONT_CONFIG.postCheckoutPopup!,
+                },
+              ] as const
+            ).map((card) => {
+              const current: StorePopupConfig = {
+                ...card.fallback,
+                ...(sf[card.field] || {}),
+              };
+              const updatePopup = (patch: Partial<StorePopupConfig>) => {
+                updateSfDraft({
+                  ...sf,
+                  [card.field]: {
+                    ...current,
+                    ...patch,
+                  },
+                });
+              };
+              const selectedProduct = current.productId
+                ? products.find((p) => p.id === current.productId)
+                : undefined;
+              const generatedProductUrl = selectedProduct
+                ? buildProductUrl(selectedProduct.id)
+                : '';
+
+              return (
+                <section
+                  key={card.key}
+                  className="bg-white rounded-[24px] p-6 border border-black/5 space-y-4"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h4 className="text-sm font-semibold text-[#1C1C1E]">{card.heading}</h4>
+                      <p className="text-[11px] text-[#72726E] mt-0.5 leading-relaxed">
+                        {card.description}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => updatePopup({ enabled: !current.enabled })}
+                      className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-colors cursor-pointer shrink-0 ${
+                        current.enabled
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-[#F5F4F0] text-[#555552] hover:text-[#1C1C1E]'
+                      }`}
+                    >
+                      {current.enabled ? 'Ligado' : 'Desligado'}
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-[#555552] mb-1">
+                        Selo / Etiqueta
+                      </label>
+                      <input
+                        type="text"
+                        value={current.badge}
+                        onChange={(e) => updatePopup({ badge: e.target.value })}
+                        placeholder="Ex: Novidade ou Oferta Especial"
+                        className="w-full border border-black/15 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#1C1C1E]"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-[#555552] mb-1">
+                        Texto do Botão
+                      </label>
+                      <input
+                        type="text"
+                        value={current.ctaText}
+                        onChange={(e) => updatePopup({ ctaText: e.target.value })}
+                        placeholder="Ex: Ver Produto"
+                        className="w-full border border-black/15 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#1C1C1E]"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-[#555552] mb-1">
+                      Título do Popup
+                    </label>
+                    <input
+                      type="text"
+                      value={current.title}
+                      onChange={(e) => updatePopup({ title: e.target.value })}
+                      placeholder="Título principal do banner popup"
+                      className="w-full border border-black/15 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-[#1C1C1E]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-[#555552] mb-1">
+                      Descrição / Mensagem
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={current.subtitle}
+                      onChange={(e) => updatePopup({ subtitle: e.target.value })}
+                      placeholder="Texto curto que aparece no popup"
+                      className="w-full border border-black/15 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#1C1C1E]"
+                    />
+                  </div>
+
+                  <div className="p-3.5 rounded-2xl bg-[#F5F4F0] border border-black/5 space-y-3">
+                    <div>
+                      <label className="block text-xs font-medium text-[#1C1C1E] mb-1">
+                        Produto Ligado ao Botão
+                      </label>
+                      <select
+                        value={current.productId || ''}
+                        onChange={(e) => {
+                          const nextProdId = e.target.value;
+                          updatePopup({
+                            productId: nextProdId,
+                            buttonUrl: nextProdId ? buildProductUrl(nextProdId) : current.buttonUrl,
+                          });
+                        }}
+                        className="w-full bg-white border border-black/15 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#1C1C1E]"
+                      >
+                        <option value="">Sem produto selecionado (usar link manual ou catálogo)</option>
+                        {products.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name} — {p.category} ({formatMoney(p.price, currencySymbol)})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <label className="block text-xs font-medium text-[#555552]">
+                          Link do Produto / Destino no Botão (URL)
+                        </label>
+                        {generatedProductUrl && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await navigator.clipboard.writeText(generatedProductUrl);
+                                setCopiedPopupLinkKey(card.key);
+                                setTimeout(() => setCopiedPopupLinkKey(null), 2000);
+                              } catch {
+                                // Ignore clipboard error
+                              }
+                            }}
+                            className="inline-flex items-center gap-1 text-[11px] font-medium text-[#1C1C1E] hover:underline cursor-pointer"
+                          >
+                            {copiedPopupLinkKey === card.key ? (
+                              <>
+                                <Check className="w-3 h-3 text-emerald-600" />
+                                <span>Link copiado</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="w-3 h-3" />
+                                <span>Copiar Link do Produto</span>
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
+                      <input
+                        type="text"
+                        value={current.buttonUrl || ''}
+                        onChange={(e) => {
+                          const nextUrl = e.target.value;
+                          updatePopup({
+                            buttonUrl: nextUrl,
+                            productId:
+                              nextUrl.trim() && !nextUrl.includes('produto=')
+                                ? ''
+                                : current.productId,
+                          });
+                        }}
+                        placeholder="https://.../?produto=... ou link de categoria/produto"
+                        className="w-full bg-white border border-black/15 rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:border-[#1C1C1E]"
+                      />
+                    </div>
+                  </div>
+
+                  <ImageField
+                    label="Imagem do Banner Popup (opcional)"
+                    recommendedSize="800 × 600 px"
+                    value={current.image || ''}
+                    onChange={(nextUrl) => updatePopup({ image: nextUrl })}
+                    allowEmpty
+                    uploadFolder="banners"
+                  />
+                </section>
+              );
+            })}
           </div>
         </div>
       )}

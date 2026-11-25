@@ -1,7 +1,17 @@
-import React from 'react';
-import { Heart, Search, ShoppingBag, User, X } from 'lucide-react';
+import React, { useMemo } from 'react';
+import { ArrowRight, Heart, Search, ShoppingBag, User, X } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import { ProductCategory } from '../../types/store';
+import { formatMoney } from '../../utils/currency';
+import { SafeImage } from '../SafeImage';
+
+function normalizeSearchStr(val: string): string {
+  return val
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
 
 interface StorefrontHeaderProps {
   onNavigateSection: (sectionId: string, category?: ProductCategory | 'Todos') => void;
@@ -23,7 +33,10 @@ export const StorefrontHeader: React.FC<StorefrontHeaderProps> = ({
   const {
     cart,
     wishlist,
+    products,
     setIsCartOpen,
+    setQuickViewProduct,
+    setSelectedCategory,
     searchQuery,
     setSearchQuery,
     settings,
@@ -35,6 +48,32 @@ export const StorefrontHeader: React.FC<StorefrontHeaderProps> = ({
     cfg.topNoticeText?.trim() ||
     'Pagamento feito apenas na entrega · Pague apenas quando receber a sua encomenda';
   const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
+
+  const normalizedQuery = normalizeSearchStr(searchQuery);
+  const searchResults = useMemo(() => {
+    if (!normalizedQuery) {
+      return products.filter((p) => p.featured).slice(0, 4);
+    }
+    const terms = normalizedQuery.split(/\s+/).filter(Boolean);
+    return products.filter((p) => {
+      const haystack = normalizeSearchStr(
+        [p.name, p.category, p.description, p.material, p.sku, ...(p.colors || [])].join(' ')
+      );
+      return terms.every((term) => haystack.includes(term));
+    });
+  }, [products, normalizedQuery]);
+
+  const scrollToCatalogResults = () => {
+    if (searchOpen) onToggleSearch();
+    setSelectedCategory('Todos');
+    window.setTimeout(() => {
+      const el =
+        document.getElementById('catalog-grid') || document.getElementById('catalog');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 60);
+  };
 
   return (
     <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-black/[0.06]">
@@ -99,7 +138,11 @@ export const StorefrontHeader: React.FC<StorefrontHeaderProps> = ({
             type="button"
             onClick={onToggleSearch}
             aria-label="Pesquisar catálogo"
-            className="hidden sm:flex w-9 h-9 items-center justify-center rounded-full text-[#111111] hover:bg-[#F3F3F3] transition-colors cursor-pointer"
+            className={`flex w-9 h-9 items-center justify-center rounded-full transition-colors cursor-pointer ${
+              searchOpen
+                ? 'bg-[#111111] text-white'
+                : 'text-[#111111] hover:bg-[#F3F3F3]'
+            }`}
           >
             {searchOpen ? <X className="w-4 h-4" /> : <Search className="w-4 h-4" />}
           </button>
@@ -153,31 +196,109 @@ export const StorefrontHeader: React.FC<StorefrontHeaderProps> = ({
         </div>
       </div>
 
-      {/* Expandable Search Bar */}
+      {/* Expandable Search Bar + Instant Live Results */}
       {searchOpen && (
-        <div className="border-t border-black/[0.06] bg-white px-4 sm:px-6 lg:px-8 py-2.5">
-          <div className="max-w-[1360px] mx-auto flex items-center gap-3 bg-[#F3F3F3] rounded-full px-4 py-1.5">
-            <Search className="w-4 h-4 text-[#666666] shrink-0" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => {
-                setSearchQuery(e.target.value);
-                onNavigateSection('catalog');
+        <div className="border-t border-black/[0.06] bg-white px-4 sm:px-6 lg:px-8 py-3 shadow-lg">
+          <div className="max-w-[1360px] mx-auto space-y-3">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                scrollToCatalogResults();
               }}
-              placeholder="Procurar casacos, vestidos, tops, malas..."
-              className="w-full bg-transparent text-xs sm:text-sm text-[#111111] placeholder:text-[#888888] focus:outline-none py-1"
-              autoFocus
-            />
-            {searchQuery && (
+              className="flex items-center gap-3 bg-[#F3F3F3] rounded-full px-4 py-2"
+            >
+              <Search className="w-4 h-4 text-[#666666] shrink-0" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Pesquisar peças, categorias, cores ou estilos..."
+                className="w-full bg-transparent text-xs sm:text-sm text-[#111111] placeholder:text-[#888888] focus:outline-none py-0.5"
+                autoFocus
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="text-xs font-medium text-[#555555] hover:text-[#111111] whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  Limpar
+                </button>
+              )}
               <button
-                type="button"
-                onClick={() => setSearchQuery('')}
-                className="text-xs font-medium text-[#555555] hover:text-[#111111] whitespace-nowrap shrink-0 cursor-pointer"
+                type="submit"
+                className="px-3 py-1 rounded-full bg-[#111111] text-white text-[11px] font-medium hover:bg-[#2B2B2B] whitespace-nowrap shrink-0 cursor-pointer"
               >
-                Limpar
+                Ver na loja
               </button>
-            )}
+            </form>
+
+            {/* Quick Live Search Results */}
+            <div className="max-h-[58vh] overflow-y-auto pr-1 space-y-2.5">
+              <div className="flex items-center justify-between gap-2 text-[11px] text-[#666666]">
+                <span className="font-semibold uppercase tracking-wider">
+                  {normalizedQuery
+                    ? `Resultados (${searchResults.length})`
+                    : 'Sugestões em Destaque'}
+                </span>
+                {normalizedQuery && searchResults.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={scrollToCatalogResults}
+                    className="inline-flex items-center gap-1 font-medium text-[#111111] hover:underline cursor-pointer"
+                  >
+                    <span>Ver todos no catálogo</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+
+              {searchResults.length === 0 ? (
+                <div className="rounded-2xl bg-[#F6F6F4] p-5 text-center space-y-2">
+                  <p className="text-xs sm:text-sm font-medium text-[#111111]">
+                    Nenhum produto encontrado para &ldquo;{searchQuery.trim()}&rdquo;.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="px-3.5 py-1.5 rounded-full bg-white border border-black/10 text-xs font-medium text-[#111111] hover:bg-black/5 cursor-pointer"
+                  >
+                    Mostrar sugestões
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 pb-1">
+                  {searchResults.slice(0, 8).map((product) => (
+                    <button
+                      key={product.id}
+                      type="button"
+                      onClick={() => {
+                        onToggleSearch();
+                        setQuickViewProduct(product);
+                      }}
+                      className="flex items-center gap-3 p-2.5 rounded-2xl bg-[#F6F6F4] hover:bg-[#ECEAE3] text-left transition-colors cursor-pointer"
+                    >
+                      <div className="w-12 h-14 rounded-xl bg-white overflow-hidden shrink-0">
+                        <SafeImage
+                          src={product.image}
+                          alt={product.name}
+                          className="w-full h-full object-contain"
+                        />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[10px] text-[#777777] truncate">{product.category}</p>
+                        <p className="text-xs font-semibold text-[#111111] truncate">
+                          {product.name}
+                        </p>
+                        <p className="text-xs font-mono font-semibold text-[#111111] tabular-nums mt-0.5">
+                          {formatMoney(product.price, settings.currencySymbol)}
+                        </p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

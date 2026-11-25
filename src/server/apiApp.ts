@@ -913,6 +913,42 @@ app.patch('/api/admin/settings', requireAdminAuth, async (req, res) => {
             };
           });
       }
+      const isSafeButtonLink = (raw: string): boolean => {
+        const trimmed = raw.trim();
+        if (!trimmed) return true;
+        return (
+          trimmed.startsWith('https://') ||
+          trimmed.startsWith('http://') ||
+          trimmed.startsWith('/') ||
+          trimmed.startsWith('?')
+        );
+      };
+
+      const sanitizePopupField = (rawPopup: any) => {
+        if (!rawPopup || typeof rawPopup !== 'object') return undefined;
+        const rawImg = typeof rawPopup.image === 'string' ? rawPopup.image.trim() : '';
+        const rawUrl = typeof rawPopup.buttonUrl === 'string' ? rawPopup.buttonUrl.trim() : '';
+        return {
+          enabled: Boolean(rawPopup.enabled),
+          badge: typeof rawPopup.badge === 'string' ? rawPopup.badge.trim().slice(0, 60) : '',
+          title: typeof rawPopup.title === 'string' ? rawPopup.title.trim().slice(0, 140) : '',
+          subtitle: typeof rawPopup.subtitle === 'string' ? rawPopup.subtitle.trim().slice(0, 280) : '',
+          ctaText: typeof rawPopup.ctaText === 'string' ? rawPopup.ctaText.trim().slice(0, 60) : 'Ver Produto',
+          image: rawImg && isSafeAssetUrl(rawImg) ? rawImg : '',
+          productId: typeof rawPopup.productId === 'string' ? rawPopup.productId.trim().slice(0, 100) : '',
+          buttonUrl: isSafeButtonLink(rawUrl) ? rawUrl.slice(0, 500) : '',
+        };
+      };
+
+      if (cfg.entryPopup !== undefined) {
+        const sanitizedEntry = sanitizePopupField(cfg.entryPopup);
+        if (sanitizedEntry) cfg.entryPopup = sanitizedEntry;
+      }
+      if (cfg.postCheckoutPopup !== undefined) {
+        const sanitizedPost = sanitizePopupField(cfg.postCheckoutPopup);
+        if (sanitizedPost) cfg.postCheckoutPopup = sanitizedPost;
+      }
+
       if (cfg.newsletter?.image !== undefined) {
         const nlImg = String(cfg.newsletter.image).trim();
         if (!nlImg) {

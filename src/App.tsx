@@ -11,6 +11,7 @@ import { StorefrontBottomNav } from './components/storefront/StorefrontBottomNav
 import { ProductDetailModal } from './components/storefront/ProductDetailModal';
 import { CartDrawer } from './components/storefront/CartDrawer';
 import { ProfileNewsletterModal } from './components/storefront/ProfileNewsletterModal';
+import { StorefrontPopupModal } from './components/storefront/StorefrontPopupModal';
 import { WhatsAppSupportButton } from './components/storefront/WhatsAppSupportButton';
 import { AdminLayout, AdminTab } from './components/admin/AdminLayout';
 import { AdminDashboard } from './components/admin/AdminDashboard';
@@ -43,9 +44,12 @@ const AppContent: React.FC = () => {
     adminToken,
     cart,
     products,
+    settings,
     isStoreLoaded,
     isCartOpen,
     quickViewProduct,
+    activePopup,
+    openPopup,
   } = useStore();
   const [adminTab, setAdminTab] = useState<AdminTab>('dashboard');
   const [adminSearch, setAdminSearch] = useState('');
@@ -78,6 +82,58 @@ const AppContent: React.FC = () => {
     }, 120);
     return () => window.clearTimeout(timer);
   }, [activeAppView, isStoreLoaded, selectedCategory]);
+
+  // Show Entry Popup banner ONLY to storefront visitors when enabled
+  useEffect(() => {
+    const ep = settings.storefrontConfig.entryPopup;
+    if (
+      activeAppView !== 'storefront' ||
+      !isStoreLoaded ||
+      !ep?.enabled ||
+      isCartOpen ||
+      quickViewProduct ||
+      activePopup
+    ) {
+      return;
+    }
+
+    const sig = JSON.stringify([
+      ep.badge || '',
+      ep.title || '',
+      ep.subtitle || '',
+      ep.image || '',
+      ep.ctaText || '',
+      ep.productId || '',
+      ep.buttonUrl || '',
+    ]);
+
+    try {
+      if (sessionStorage.getItem('lunora_entry_popup_seen_sig') === sig) {
+        return;
+      }
+    } catch {
+      // Ignore storage error
+    }
+
+    const timer = window.setTimeout(() => {
+      try {
+        sessionStorage.setItem('lunora_entry_popup_seen_sig', sig);
+      } catch {
+        // Ignore storage error
+      }
+      openPopup('entry');
+    }, 650);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    activeAppView,
+    isStoreLoaded,
+    settings.storefrontConfig.entryPopup,
+    isCartOpen,
+    quickViewProduct,
+    activePopup,
+    openPopup,
+  ]);
 
   // Non-blocking immediate real-time visitor tracking on storefront mount
   useEffect(() => {
@@ -279,11 +335,13 @@ const AppContent: React.FC = () => {
         onSearch={() => {
           setProfileModalOpen(false);
           setWishlistOnly(false);
-          setStoreSearchOpen((v) => !v);
-          requestAnimationFrame(() => {
-            const el = document.getElementById('catalog');
-            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          });
+          const nextOpen = !storeSearchOpen;
+          setStoreSearchOpen(nextOpen);
+          if (nextOpen) {
+            requestAnimationFrame(() => {
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            });
+          }
         }}
         onToggleWishlist={() => {
           setProfileModalOpen(false);
@@ -299,6 +357,7 @@ const AppContent: React.FC = () => {
 
       <ProductDetailModal />
       <CartDrawer />
+      <StorefrontPopupModal />
       <ProfileNewsletterModal
         isOpen={profileModalOpen}
         onClose={() => setProfileModalOpen(false)}

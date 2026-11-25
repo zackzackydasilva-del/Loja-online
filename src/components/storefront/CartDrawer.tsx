@@ -36,6 +36,7 @@ export const CartDrawer: React.FC = () => {
     placeOrder,
     settings,
     setQuickViewProduct,
+    openPopup,
   } = useStore();
 
   const [step, setStep] = useState<'cart' | 'checkout' | 'confirmed'>('cart');
@@ -60,6 +61,8 @@ export const CartDrawer: React.FC = () => {
   const draftOrderIdRef = useRef<string>(draftOrderId);
   draftOrderIdRef.current = draftOrderId;
   const lastSavedPayloadRef = useRef<string>('');
+  const triggeredPopupOrderIdRef = useRef<string>('');
+  const postCheckoutTimerRef = useRef<number | null>(null);
 
   const activePromoCode = (settings.storefrontConfig.newsletter.promoCode || 'LUNORA10').trim().toUpperCase();
 
@@ -125,6 +128,30 @@ export const CartDrawer: React.FC = () => {
     form.customerEmail,
     form.city,
     confirmedOrder,
+  ]);
+
+  useEffect(() => {
+    if (!isCartOpen || step !== 'confirmed' || !confirmedOrder) return;
+    if (!settings.storefrontConfig.postCheckoutPopup?.enabled) return;
+    if (triggeredPopupOrderIdRef.current === confirmedOrder.id) return;
+
+    postCheckoutTimerRef.current = window.setTimeout(() => {
+      triggeredPopupOrderIdRef.current = confirmedOrder.id;
+      openPopup('postCheckout');
+    }, 1400);
+
+    return () => {
+      if (postCheckoutTimerRef.current) {
+        window.clearTimeout(postCheckoutTimerRef.current);
+        postCheckoutTimerRef.current = null;
+      }
+    };
+  }, [
+    isCartOpen,
+    step,
+    confirmedOrder,
+    settings.storefrontConfig.postCheckoutPopup?.enabled,
+    openPopup,
   ]);
 
   useEffect(() => {
@@ -244,7 +271,23 @@ export const CartDrawer: React.FC = () => {
   };
 
   const resetAndClose = () => {
+    const shouldShowPopupNow =
+      step === 'confirmed' &&
+      confirmedOrder &&
+      settings.storefrontConfig.postCheckoutPopup?.enabled &&
+      triggeredPopupOrderIdRef.current !== confirmedOrder.id;
+
+    if (postCheckoutTimerRef.current) {
+      window.clearTimeout(postCheckoutTimerRef.current);
+      postCheckoutTimerRef.current = null;
+    }
+
     setIsCartOpen(false);
+    if (shouldShowPopupNow && confirmedOrder) {
+      triggeredPopupOrderIdRef.current = confirmedOrder.id;
+      window.setTimeout(() => openPopup('postCheckout'), 220);
+    }
+
     setTimeout(() => {
       setStep('cart');
       setConfirmedOrder(null);

@@ -128,6 +128,14 @@ function mergeStorefrontConfig(raw: unknown): StorefrontConfig {
               : 'Todos',
         }))
       : [],
+    entryPopup: {
+      ...DEFAULT_STOREFRONT_CONFIG.entryPopup!,
+      ...(obj.entryPopup || {}),
+    },
+    postCheckoutPopup: {
+      ...DEFAULT_STOREFRONT_CONFIG.postCheckoutPopup!,
+      ...(obj.postCheckoutPopup || {}),
+    },
     guarantees:
       Array.isArray(obj.guarantees) && obj.guarantees.length > 0
         ? obj.guarantees
@@ -174,6 +182,18 @@ function mergeStorefrontConfigPatch(
         }
       : baseBottom,
     highlights: (Array.isArray(patch.highlights) ? patch.highlights : base.highlights || []).slice(0, 4),
+    entryPopup: patch.entryPopup
+      ? {
+          ...(base.entryPopup || DEFAULT_STOREFRONT_CONFIG.entryPopup!),
+          ...patch.entryPopup,
+        }
+      : base.entryPopup || DEFAULT_STOREFRONT_CONFIG.entryPopup!,
+    postCheckoutPopup: patch.postCheckoutPopup
+      ? {
+          ...(base.postCheckoutPopup || DEFAULT_STOREFRONT_CONFIG.postCheckoutPopup!),
+          ...patch.postCheckoutPopup,
+        }
+      : base.postCheckoutPopup || DEFAULT_STOREFRONT_CONFIG.postCheckoutPopup!,
     newsletter: {
       ...base.newsletter,
       ...(patch.newsletter || {}),
@@ -2897,6 +2917,20 @@ export async function updateSettingsInStore(
             productId: '',
             image: h.image ? await persistImageAsset(supabase, h.image, 'banners') : '',
           }))
+        );
+      }
+      if (merged.entryPopup?.image) {
+        merged.entryPopup.image = await persistImageAsset(
+          supabase,
+          merged.entryPopup.image,
+          'banners'
+        );
+      }
+      if (merged.postCheckoutPopup?.image) {
+        merged.postCheckoutPopup.image = await persistImageAsset(
+          supabase,
+          merged.postCheckoutPopup.image,
+          'banners'
         );
       }
       if (merged.newsletter?.image) {

@@ -23,6 +23,7 @@ import {
 import { getVisitorSessionId } from '../utils/storeTracker';
 import {
   getCategoryParamFromLocation,
+  getProductParamFromLocation,
   resolveCategoryFromParam,
 } from '../utils/categoryLinks';
 
@@ -144,6 +145,9 @@ interface StoreContextValue {
   setIsCartOpen: (open: boolean) => void;
   quickViewProduct: Product | null;
   setQuickViewProduct: (p: Product | null) => void;
+  activePopup: 'entry' | 'postCheckout' | null;
+  openPopup: (kind: 'entry' | 'postCheckout') => void;
+  closePopup: () => void;
   adminToken: string | null;
   adminAuthMode: 'loading' | 'setup' | 'login' | 'authenticated';
   adminManagedByEnv: boolean;
@@ -244,6 +248,15 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [searchQuery, setSearchQuery] = useState('');
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [quickViewProduct, setQuickViewProduct] = useState<Product | null>(null);
+  const [activePopup, setActivePopup] = useState<'entry' | 'postCheckout' | null>(null);
+
+  const openPopup = useCallback((kind: 'entry' | 'postCheckout') => {
+    setActivePopup(kind);
+  }, []);
+
+  const closePopup = useCallback(() => {
+    setActivePopup(null);
+  }, []);
 
   const [adminToken, setAdminTokenState] = useState<string | null>(() => {
     try {
@@ -304,6 +317,19 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       window.removeEventListener('popstate', syncCategoryFromUrl);
     };
   }, [settings.storefrontConfig?.categoryStripItems, products]);
+
+  // Open product modal automatically when arriving via ?produto=<id>
+  const openedUrlProductRef = React.useRef<string | null>(null);
+  useEffect(() => {
+    if (activeAppView !== 'storefront' || products.length === 0) return;
+    const prodParam = getProductParamFromLocation();
+    if (!prodParam || openedUrlProductRef.current === prodParam) return;
+    const matched = products.find((p) => p.id === prodParam || p.sku.toLowerCase() === prodParam.toLowerCase());
+    if (matched) {
+      openedUrlProductRef.current = prodParam;
+      setQuickViewProduct(matched);
+    }
+  }, [activeAppView, products]);
 
   useEffect(() => {
     if (settings.storeName) {
@@ -834,6 +860,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setIsCartOpen,
         quickViewProduct,
         setQuickViewProduct,
+        activePopup,
+        openPopup,
+        closePopup,
         adminToken,
         adminAuthMode,
         adminManagedByEnv,
