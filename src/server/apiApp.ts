@@ -15,6 +15,7 @@ import {
   deleteTaskInStore,
   getAdminBundle,
   getAdminPasswordHash,
+  getOrderNotificationsInStore,
   getPublicStoreData,
   resetDemoDataInStore,
   saveAdminPasswordHash,
@@ -27,6 +28,12 @@ import {
   uploadImageAssetInStore,
   upsertCheckoutPendingOrderInStore,
 } from './storeRepository.ts';
+import {
+  getEmailTransportStatus,
+  isValidEmailAddress,
+  notifyNewOrderAsync,
+  sendTestOrderNotificationAsync,
+} from './orderNotificationService.ts';
 import {
   getAuthoritativeRealtimeSnapshot,
   processPresenceLeaveAsync,
@@ -294,6 +301,10 @@ app.post('/api/orders', async (req, res) => {
       typeof body.sessionId === 'string' ? body.sessionId : undefined
     );
 
+    await notifyNewOrderAsync(order).catch((notifyErr) => {
+      console.warn('Order email notification warning:', notifyErr);
+    });
+
     res.status(201).json(order);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Erro ao registar encomenda.';
@@ -345,6 +356,39 @@ app.get('/api/admin/analytics/live', requireAdminAuth, async (_req, res) => {
   } catch (err) {
     console.error('GET /api/admin/analytics/live failed:', err);
     res.status(500).json({ error: 'Falha ao carregar analítico em tempo real.' });
+  }
+});
+
+app.get('/api/admin/notifications', requireAdminAuth, async (_req, res) => {
+  try {
+    const notifications = await getOrderNotificationsInStore();
+    res.json({
+      notifications,
+      transport: getEmailTransportStatus(),
+    });
+  } catch (err) {
+    console.error('GET /api/admin/notifications failed:', err);
+    res.status(500).json({ error: 'Falha ao carregar notificações.' });
+  }
+});
+
+app.post('/api/admin/notifications/test', requireAdminAuth, async (req, res) => {
+  try {
+    const rawRecipient =
+      typeof req.body?.recipientEmail === 'string' ? req.body.recipientEmail.trim() : '';
+    if (rawRecipient && !isValidEmailAddress(rawRecipient)) {
+      res.status(400).json({ error: 'Informe um endereço de email válido para o teste.' });
+      return;
+    }
+    const notification = await sendTestOrderNotificationAsync(rawRecipient || undefined);
+    res.json({
+      ok: true,
+      notification,
+      transport: getEmailTransportStatus(),
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Erro ao testar envio de notificação.';
+    res.status(400).json({ error: message });
   }
 });
 
@@ -947,6 +991,19 @@ app.patch('/api/admin/settings', requireAdminAuth, async (req, res) => {
       if (cfg.postCheckoutPopup !== undefined) {
         const sanitizedPost = sanitizePopupField(cfg.postCheckoutPopup);
         if (sanitizedPost) cfg.postCheckoutPopup = sanitizedPost;
+      }
+      if (cfg.orderNotification !== undefined && cfg.orderNotification && typeof cfg.orderNotification === 'object') {
+        const rawEmail =
+          typeof cfg.orderNotification.recipientEmail === 'string'
+            ? cfg.orderNotification.recipientEmail.trim()
+            : '';
+        cfg.orderNotification = {
+          enabled: Boolean(cfg.orderNotification.enabled),
+          recipientEmail:
+            rawEmail && isValidEmailAddress(rawEmail)
+              ? rawEmail
+              : 'pintozacarias806@gmail.com',
+        };
       }
 
       if (cfg.newsletter?.image !== undefined) {

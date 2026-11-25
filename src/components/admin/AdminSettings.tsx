@@ -8,8 +8,10 @@ import {
   ExternalLink,
   LayoutTemplate,
   Lock,
+  Mail,
   Plus,
   RotateCcw,
+  Send,
   SlidersHorizontal,
   Sparkles,
   Star,
@@ -22,6 +24,7 @@ import {
   CategoryRenameEntry,
   CategoryStripItemConfig,
   HighlightCardConfig,
+  OrderNotificationRecord,
   ProductCategory,
   StorePopupConfig,
   StorefrontConfig,
@@ -85,6 +88,10 @@ function mergeStorefrontConfig(cfg?: Partial<StorefrontConfig>): StorefrontConfi
       ...DEFAULT_STOREFRONT_CONFIG.postCheckoutPopup!,
       ...(cfg?.postCheckoutPopup || {}),
     },
+    orderNotification: {
+      ...DEFAULT_STOREFRONT_CONFIG.orderNotification!,
+      ...(cfg?.orderNotification || {}),
+    },
     guarantees:
       cfg?.guarantees && cfg.guarantees.length > 0
         ? cfg.guarantees
@@ -111,6 +118,7 @@ export const AdminSettings: React.FC = () => {
     resetDemoData,
     adminManagedByEnv,
     changeAdminPassword,
+    adminToken,
     setActiveAppView,
     setSelectedCategory,
     setSearchQuery,
@@ -134,6 +142,17 @@ export const AdminSettings: React.FC = () => {
   const [categoryRenames, setCategoryRenames] = useState<Record<string, string>>({});
   const [copiedCategoryKey, setCopiedCategoryKey] = useState<string | null>(null);
   const [copiedPopupLinkKey, setCopiedPopupLinkKey] = useState<'entry' | 'postCheckout' | null>(null);
+  const [orderNotifications, setOrderNotifications] = useState<OrderNotificationRecord[]>([]);
+  const [emailTransportInfo, setEmailTransportInfo] = useState<{
+    configured: boolean;
+    provider: 'resend' | 'smtp' | 'none';
+    defaultRecipient: string;
+  } | null>(null);
+  const [testingEmail, setTestingEmail] = useState(false);
+  const [testEmailFeedback, setTestEmailFeedback] = useState<{
+    type: 'ok' | 'warn';
+    msg: string;
+  } | null>(null);
 
   const [newChannelName, setNewChannelName] = useState('');
   const [newChannelRole, setNewChannelRole] = useState('');
@@ -158,6 +177,33 @@ export const AdminSettings: React.FC = () => {
     setSf(mergeStorefrontConfig(settings.storefrontConfig));
     setCategoryRenames({});
   }, [settings]);
+
+  useEffect(() => {
+    if (section !== 'popups' || !adminToken) return;
+    let active = true;
+    fetch('/api/admin/notifications', {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then(
+        (
+          data: {
+            notifications?: OrderNotificationRecord[];
+            transport?: { configured: boolean; provider: 'resend' | 'smtp' | 'none'; defaultRecipient: string };
+          } | null
+        ) => {
+          if (!active || !data) return;
+          if (Array.isArray(data.notifications)) setOrderNotifications(data.notifications);
+          if (data.transport) setEmailTransportInfo(data.transport);
+        }
+      )
+      .catch(() => {
+        // Ignore error
+      });
+    return () => {
+      active = false;
+    };
+  }, [section, adminToken]);
 
   const dynamicCategoryOptions = useMemo(() => {
     const names = (sf.categoryStripItems || [])
@@ -2030,7 +2076,7 @@ export const AdminSettings: React.FC = () => {
                 Popups & Notificações da Loja
               </h3>
               <p className="text-xs text-[#72726E] mt-1">
-                Ative banners popup para quem entra na loja e para quem conclui a encomenda após a fatura, com links diretos para produtos nos botões.
+                Ative banners popup na loja e configure a notificação em tempo real enviada por email quando um cliente faz um pedido.
               </p>
             </div>
             <button
@@ -2042,6 +2088,223 @@ export const AdminSettings: React.FC = () => {
               {saving ? 'A guardar...' : 'Guardar Popups & Notificações'}
             </button>
           </div>
+
+          {/* REAL-TIME ORDER EMAIL NOTIFICATIONS CARD */}
+          <section className="bg-white rounded-[24px] p-6 border border-black/5 space-y-4">
+            {(() => {
+              const orderNotifCfg = sf.orderNotification || {
+                enabled: true,
+                recipientEmail: 'pintozacarias806@gmail.com',
+              };
+              const updateOrderNotif = (patch: Partial<typeof orderNotifCfg>) => {
+                updateSfDraft({
+                  ...sf,
+                  orderNotification: {
+                    ...orderNotifCfg,
+                    ...patch,
+                  },
+                });
+              };
+
+              const handleSendTestEmail = async () => {
+                if (!adminToken) return;
+                setTestingEmail(true);
+                setTestEmailFeedback(null);
+                try {
+                  const res = await fetch('/api/admin/notifications/test', {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      Authorization: `Bearer ${adminToken}`,
+                    },
+                    body: JSON.stringify({
+                      recipientEmail: orderNotifCfg.recipientEmail,
+                    }),
+                  });
+                  const data = (await res.json()) as {
+                    notification?: OrderNotificationRecord;
+                    transport?: { configured: boolean; provider: 'resend' | 'smtp' | 'none'; defaultRecipient: string };
+                    error?: string;
+                  };
+                  if (data.transport) setEmailTransportInfo(data.transport);
+                  if (data.notification) {
+                    const notif = data.notification;
+                    setOrderNotifications((prev) => [
+                      notif,
+                      ...prev.filter((n) => n.id !== notif.id),
+                    ]);
+                    if (notif.emailStatus === 'sent') {
+                      setTestEmailFeedback({
+                        type: 'ok',
+                        msg: `Email de teste "${notif.title}" enviado com sucesso para ${notif.recipientEmail}.`,
+                      });
+                    } else {
+                      setTestEmailFeedback({
+                        type: 'warn',
+                        msg:
+                          notif.errorMessage ||
+                          'Notificação registada em tempo real no painel, mas o envio SMTP/Resend aguarda configuração no servidor.',
+                      });
+                    }
+                  } else if (!res.ok) {
+                    setTestEmailFeedback({
+                      type: 'warn',
+                      msg: data.error || 'Não foi possível enviar o teste.',
+                    });
+                  }
+                } catch {
+                  setTestEmailFeedback({
+                    type: 'warn',
+                    msg: 'Erro de ligação ao testar envio de notificação.',
+                  });
+                } finally {
+                  setTestingEmail(false);
+                }
+              };
+
+              return (
+                <>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-2xl bg-[#1C1C1E] text-white flex items-center justify-center shrink-0">
+                        <Mail className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-semibold text-[#1C1C1E]">
+                          Notificação de Pedido por Email em Tempo Real
+                        </h4>
+                        <p className="text-[11px] text-[#72726E] mt-0.5 leading-relaxed">
+                          Sempre que o cliente concluir um pedido, é enviada a notificação &ldquo;Pedido de &#123;nome do produto, quantidade&#125;&rdquo; com a descrição completa de cada produto para o email abaixo.
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => updateOrderNotif({ enabled: !orderNotifCfg.enabled })}
+                      className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-colors cursor-pointer shrink-0 ${
+                        orderNotifCfg.enabled
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-[#F5F4F0] text-[#555552] hover:text-[#1C1C1E]'
+                      }`}
+                    >
+                      {orderNotifCfg.enabled ? 'Ligado' : 'Desligado'}
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                    <div className="md:col-span-6">
+                      <label className="block text-xs font-medium text-[#555552] mb-1">
+                        Email que Recebe as Notificações de Pedido
+                      </label>
+                      <input
+                        type="email"
+                        value={orderNotifCfg.recipientEmail}
+                        onChange={(e) => updateOrderNotif({ recipientEmail: e.target.value })}
+                        placeholder="pintozacarias806@gmail.com"
+                        className="w-full border border-black/15 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-[#1C1C1E]"
+                      />
+                    </div>
+
+                    <div className="md:col-span-3">
+                      <div className="px-3.5 py-2.5 rounded-xl bg-[#F5F4F0] border border-black/5 text-xs">
+                        <span className="text-[#72726E]">Estado do envio: </span>
+                        <span
+                          className={`font-semibold ${
+                            emailTransportInfo?.configured ? 'text-emerald-700' : 'text-amber-700'
+                          }`}
+                        >
+                          {emailTransportInfo?.configured
+                            ? emailTransportInfo.provider === 'resend'
+                              ? 'Resend Ativo'
+                              : 'SMTP Gmail Ativo'
+                            : 'Aguardar SMTP / Resend'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="md:col-span-3">
+                      <button
+                        type="button"
+                        disabled={testingEmail}
+                        onClick={handleSendTestEmail}
+                        className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#1C1C1E] text-white text-xs font-medium hover:bg-[#323235] disabled:opacity-60 cursor-pointer"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        <span>{testingEmail ? 'A enviar teste...' : 'Testar Notificação'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {!emailTransportInfo?.configured && (
+                    <p className="text-[11px] text-[#72726E] bg-[#F5F4F0] rounded-xl px-3.5 py-2.5">
+                      Para entregar automaticamente na caixa de entrada do Gmail, defina <span className="font-mono font-semibold text-[#1C1C1E]">SMTP_USER</span> e <span className="font-mono font-semibold text-[#1C1C1E]">SMTP_PASS</span> (Senha de Aplicação Gmail) ou <span className="font-mono font-semibold text-[#1C1C1E]">RESEND_API_KEY</span> nas Secrets do projeto.
+                    </p>
+                  )}
+
+                  {testEmailFeedback && (
+                    <div
+                      className={`rounded-xl px-3.5 py-2.5 text-xs ${
+                        testEmailFeedback.type === 'ok'
+                          ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                          : 'bg-amber-50 text-amber-900 border border-amber-200'
+                      }`}
+                    >
+                      {testEmailFeedback.msg}
+                    </div>
+                  )}
+
+                  {orderNotifications.length > 0 && (
+                    <div className="pt-2 border-t border-black/6 space-y-2">
+                      <p className="text-xs font-semibold text-[#1C1C1E]">
+                        Últimas Notificações Geradas
+                      </p>
+                      <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                        {orderNotifications.slice(0, 6).map((notif) => (
+                          <div
+                            key={notif.id}
+                            className="p-3 rounded-xl bg-[#F5F4F0] border border-black/5 space-y-1.5"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="text-xs font-semibold text-[#1C1C1E]">
+                                {notif.title}
+                              </span>
+                              <span
+                                className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                                  notif.emailStatus === 'sent'
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-amber-100 text-amber-800'
+                                }`}
+                              >
+                                {notif.emailStatus === 'sent'
+                                  ? `Enviado → ${notif.recipientEmail}`
+                                  : `Registo em tempo real → ${notif.recipientEmail}`}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-[#555552]">
+                              Cliente: {notif.customerName} · Encomenda #{notif.orderId} ·{' '}
+                              {formatMoney(notif.total, notif.currencySymbol)}
+                            </p>
+                            {notif.items.map((item, idx) => (
+                              <p
+                                key={`${notif.id}-item-${idx}`}
+                                className="text-[11px] text-[#333330] bg-white rounded-lg px-2.5 py-1.5 border border-black/5"
+                              >
+                                <span className="font-semibold">
+                                  {item.name} ({item.quantity} un.):
+                                </span>{' '}
+                                {item.description}
+                              </p>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
+          </section>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
             {(

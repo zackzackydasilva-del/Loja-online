@@ -206,6 +206,43 @@ export interface StorePopupConfig {
   buttonUrl?: string;
 }
 
+export interface OrderEmailNotificationConfig {
+  enabled: boolean;
+  recipientEmail: string;
+}
+
+export interface OrderNotificationItemDetail {
+  productId: string;
+  name: string;
+  quantity: number;
+  size: string;
+  unitPrice: number;
+  sku?: string;
+  category?: string;
+  material?: string;
+  description: string;
+}
+
+export interface OrderNotificationRecord {
+  id: string;
+  orderId: string;
+  title: string;
+  recipientEmail: string;
+  customerName: string;
+  customerEmail: string;
+  customerPhone: string;
+  shippingAddress: string;
+  city: string;
+  paymentMethod: PaymentMethod;
+  total: number;
+  currencySymbol: string;
+  items: OrderNotificationItemDetail[];
+  emailStatus: 'sent' | 'failed' | 'unconfigured' | 'disabled';
+  provider?: 'resend' | 'smtp' | 'none';
+  errorMessage?: string;
+  createdAt: string;
+}
+
 export interface StorefrontConfig {
   topNoticeText?: string;
   headerWordmark: string;
@@ -234,6 +271,7 @@ export interface StorefrontConfig {
   highlights?: HighlightCardConfig[];
   entryPopup?: StorePopupConfig;
   postCheckoutPopup?: StorePopupConfig;
+  orderNotification?: OrderEmailNotificationConfig;
   catalogEyebrow: string;
   catalogTitle: string;
   guarantees: TrustBadgeConfig[];

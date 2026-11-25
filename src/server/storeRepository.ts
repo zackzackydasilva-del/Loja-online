@@ -10,6 +10,7 @@ import type {
   CategoryRenameEntry,
   LiveVisitorSession,
   OrderItemSummary,
+  OrderNotificationRecord,
   OrderStatus,
   PaymentMethod,
   Product,
@@ -136,6 +137,10 @@ function mergeStorefrontConfig(raw: unknown): StorefrontConfig {
       ...DEFAULT_STOREFRONT_CONFIG.postCheckoutPopup!,
       ...(obj.postCheckoutPopup || {}),
     },
+    orderNotification: {
+      ...DEFAULT_STOREFRONT_CONFIG.orderNotification!,
+      ...(obj.orderNotification || {}),
+    },
     guarantees:
       Array.isArray(obj.guarantees) && obj.guarantees.length > 0
         ? obj.guarantees
@@ -194,6 +199,12 @@ function mergeStorefrontConfigPatch(
           ...patch.postCheckoutPopup,
         }
       : base.postCheckoutPopup || DEFAULT_STOREFRONT_CONFIG.postCheckoutPopup!,
+    orderNotification: patch.orderNotification
+      ? {
+          ...(base.orderNotification || DEFAULT_STOREFRONT_CONFIG.orderNotification!),
+          ...patch.orderNotification,
+        }
+      : base.orderNotification || DEFAULT_STOREFRONT_CONFIG.orderNotification!,
     newsletter: {
       ...base.newsletter,
       ...(patch.newsletter || {}),
@@ -216,12 +227,14 @@ function mergeStorefrontConfigPatch(
 const STOREFRONT_CONFIG_META_ID = '__lunora_storefront_config__';
 const STORE_COSTS_META_ID = '__lunora_store_costs__';
 const STORE_ANALYTICS_META_ID = '__lunora_analytics_events__';
+const STORE_ORDER_NOTIFICATIONS_META_ID = '__lunora_order_notifications__';
 
 function isMetaIntegrationId(id: unknown): boolean {
   return (
     id === STOREFRONT_CONFIG_META_ID ||
     id === STORE_COSTS_META_ID ||
-    id === STORE_ANALYTICS_META_ID
+    id === STORE_ANALYTICS_META_ID ||
+    id === STORE_ORDER_NOTIFICATIONS_META_ID
   );
 }
 
@@ -274,19 +287,55 @@ function normalizeEmbeddedAnalyticsEvent(item: unknown): StoreAnalyticsEvent | n
   };
 }
 
+function normalizeEmbeddedOrderNotification(item: unknown): OrderNotificationRecord | null {
+  if (!item || typeof item !== 'object') return null;
+  const rec = item as Record<string, unknown>;
+  const id = String(rec.id || '').trim();
+  const orderId = String(rec.orderId || '').trim();
+  const title = String(rec.title || '').trim();
+  if (!id || !orderId || !title) return null;
+  return {
+    id,
+    orderId,
+    title,
+    recipientEmail: String(rec.recipientEmail || ''),
+    customerName: String(rec.customerName || ''),
+    customerEmail: String(rec.customerEmail || ''),
+    customerPhone: String(rec.customerPhone || ''),
+    shippingAddress: String(rec.shippingAddress || ''),
+    city: String(rec.city || ''),
+    paymentMethod: (String(rec.paymentMethod || 'Contra-Reembolso') as PaymentMethod),
+    total: Number(rec.total ?? 0),
+    currencySymbol: String(rec.currencySymbol || 'Kz'),
+    items: Array.isArray(rec.items) ? (rec.items as OrderNotificationRecord['items']) : [],
+    emailStatus: (String(rec.emailStatus || 'unconfigured') as OrderNotificationRecord['emailStatus']),
+    provider: rec.provider ? (String(rec.provider) as OrderNotificationRecord['provider']) : undefined,
+    errorMessage: rec.errorMessage ? String(rec.errorMessage) : undefined,
+    createdAt: String(rec.createdAt || new Date().toISOString()),
+  };
+}
+
 function extractIntegrationsAndConfig(rawIntegrations: unknown): {
   integrations: StoreSettings['integrations'];
   embeddedConfig: Partial<StorefrontConfig> | null;
   embeddedCosts: StoreCost[];
   embeddedEvents: StoreAnalyticsEvent[];
+  embeddedNotifications: OrderNotificationRecord[];
 } {
   if (!Array.isArray(rawIntegrations)) {
-    return { integrations: [], embeddedConfig: null, embeddedCosts: [], embeddedEvents: [] };
+    return {
+      integrations: [],
+      embeddedConfig: null,
+      embeddedCosts: [],
+      embeddedEvents: [],
+      embeddedNotifications: [],
+    };
   }
   const integrations: StoreSettings['integrations'] = [];
   let embeddedConfig: Partial<StorefrontConfig> | null = null;
   let embeddedCosts: StoreCost[] = [];
   let embeddedEvents: StoreAnalyticsEvent[] = [];
+  let embeddedNotifications: OrderNotificationRecord[] = [];
   for (const item of rawIntegrations) {
     if (item && typeof item === 'object') {
       const rec = item as Record<string, unknown>;
@@ -312,17 +361,26 @@ function extractIntegrationsAndConfig(rawIntegrations: unknown): {
         }
         continue;
       }
+      if (rec.id === STORE_ORDER_NOTIFICATIONS_META_ID) {
+        if (Array.isArray(rec.notifications)) {
+          embeddedNotifications = rec.notifications
+            .map(normalizeEmbeddedOrderNotification)
+            .filter((n): n is OrderNotificationRecord => n !== null);
+        }
+        continue;
+      }
       integrations.push(item as StoreSettings['integrations'][number]);
     }
   }
-  return { integrations, embeddedConfig, embeddedCosts, embeddedEvents };
+  return { integrations, embeddedConfig, embeddedCosts, embeddedEvents, embeddedNotifications };
 }
 
 function packIntegrationsWithConfig(
   visibleIntegrations: StoreSettings['integrations'],
   config: StorefrontConfig | null,
   costs: StoreCost[] = [],
-  events: StoreAnalyticsEvent[] = []
+  events: StoreAnalyticsEvent[] = [],
+  notifications: OrderNotificationRecord[] = []
 ): unknown[] {
   const clean = visibleIntegrations.filter((i) => i && !isMetaIntegrationId(i.id));
   const packed: unknown[] = [...clean];
@@ -353,7 +411,21 @@ function packIntegrationsWithConfig(
       events: events.slice(0, 400),
     });
   }
+  if (notifications.length > 0) {
+    packed.push({
+      id: STORE_ORDER_NOTIFICATIONS_META_ID,
+      name: 'order_notifications',
+      role: 'system',
+      connected: false,
+      notifications: notifications.slice(0, 100),
+    });
+  }
   return packed;
+}
+
+function stripAdminOnlyStorefrontFields(cfg: StorefrontConfig): StorefrontConfig {
+  const { orderNotification: _hidden, ...publicSf } = cfg;
+  return publicSf;
 }
 
 function resolveStorefrontFromRow(row: Record<string, unknown> | null): StorefrontConfig | null {
@@ -388,6 +460,7 @@ interface MemoryStore {
   adminPasswordHash: string | null;
   livePresence: LiveVisitorSession[];
   analyticsEvents: StoreAnalyticsEvent[];
+  orderNotifications: OrderNotificationRecord[];
 }
 
 const memoryStore: MemoryStore = {
@@ -405,6 +478,7 @@ const memoryStore: MemoryStore = {
   adminPasswordHash: null,
   livePresence: [],
   analyticsEvents: [],
+  orderNotifications: [],
 };
 
 let cachedClient: SupabaseClient | null = null;
@@ -1172,7 +1246,10 @@ export async function getPublicStoreData(forceFresh = false): Promise<PublicStor
 
         const payload: PublicStorePayload = {
           products: prodRes.data.map((r) => mapProductFromRow(r as Record<string, unknown>)),
-          settings: resolvedSettings,
+          settings: {
+            ...resolvedSettings,
+            storefrontConfig: stripAdminOnlyStorefrontFields(resolvedSettings.storefrontConfig),
+          },
           persistence: 'supabase',
         };
         publicStoreCache = { data: payload, cachedAt: Date.now() };
@@ -1187,7 +1264,7 @@ export async function getPublicStoreData(forceFresh = false): Promise<PublicStor
         currencySymbol: memoryStore.settings.currencySymbol,
         freeShippingThreshold: memoryStore.settings.freeShippingThreshold,
         supportEmail: memoryStore.settings.supportEmail,
-        storefrontConfig: memoryStore.settings.storefrontConfig,
+        storefrontConfig: stripAdminOnlyStorefrontFields(memoryStore.settings.storefrontConfig),
       },
       persistence: 'memory',
     };
@@ -2832,6 +2909,7 @@ export async function updateSettingsInStore(
       integrations: currentIntegrations,
       embeddedCosts: currentEmbeddedCosts,
       embeddedEvents: currentEmbeddedEvents,
+      embeddedNotifications: currentEmbeddedNotifications,
     } = extractIntegrationsAndConfig(currentRow?.integrations);
     const currentStorefrontConfig =
       resolveStorefrontFromRow(currentRow) || memoryStore.settings.storefrontConfig;
@@ -2958,7 +3036,8 @@ export async function updateSettingsInStore(
           nextIntegrations,
           null,
           currentEmbeddedCosts,
-          currentEmbeddedEvents
+          currentEmbeddedEvents,
+          currentEmbeddedNotifications
         );
       }
       if (nextStorefrontConfig) {
@@ -2971,7 +3050,8 @@ export async function updateSettingsInStore(
           nextIntegrations,
           configToEmbed,
           currentEmbeddedCosts,
-          currentEmbeddedEvents
+          currentEmbeddedEvents,
+          currentEmbeddedNotifications
         );
       }
     }
@@ -3011,7 +3091,8 @@ export async function updateSettingsInStore(
               nextIntegrations,
               configToEmbed,
               currentEmbeddedCosts,
-              currentEmbeddedEvents
+              currentEmbeddedEvents,
+              currentEmbeddedNotifications
             );
             res = await supabase
               .from('store_settings')
@@ -3169,6 +3250,7 @@ async function syncEmbeddedCostsToSettings(
     embeddedConfig: currentEmbeddedConfig,
     embeddedCosts,
     embeddedEvents,
+    embeddedNotifications,
   } = extractIntegrationsAndConfig(currentRow?.integrations);
 
   const nextCosts = updater(embeddedCosts);
@@ -3176,7 +3258,8 @@ async function syncEmbeddedCostsToSettings(
     currentIntegrations,
     currentEmbeddedConfig ? mergeStorefrontConfig(currentEmbeddedConfig) : null,
     nextCosts,
-    embeddedEvents
+    embeddedEvents,
+    embeddedNotifications
   );
 
   const { error } = await supabase
@@ -3407,6 +3490,7 @@ async function syncEmbeddedAnalyticsFallback(
     embeddedConfig: currentEmbeddedConfig,
     embeddedCosts,
     embeddedEvents,
+    embeddedNotifications,
   } = extractIntegrationsAndConfig(currentRow?.integrations);
 
   const merged = [event, ...embeddedEvents.filter((e) => e.id !== event.id)].slice(0, 400);
@@ -3414,7 +3498,8 @@ async function syncEmbeddedAnalyticsFallback(
     currentIntegrations,
     currentEmbeddedConfig ? mergeStorefrontConfig(currentEmbeddedConfig) : null,
     embeddedCosts,
-    merged
+    merged,
+    embeddedNotifications
   );
 
   const { error } = await supabase
@@ -3614,4 +3699,129 @@ export async function getPersistedRealtimeSnapshot(limit = 2000): Promise<{
     sessions: memoryStore.livePresence.filter((s) => s.lastSeenAt >= activeCutoffIso),
     events: memoryStore.analyticsEvents.slice(0, limit),
   };
+}
+
+export async function getOrderNotificationRuntimeContext(): Promise<{
+  products: Product[];
+  storeName: string;
+  currencySymbol: string;
+  orderNotification: { enabled: boolean; recipientEmail: string };
+}> {
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    await ensureSupabaseSeeded(supabase).catch(() => false);
+    const settingsCols = hasStorefrontConfigCol
+      ? 'store_name, currency_symbol, integrations, storefront_config'
+      : 'store_name, currency_symbol, integrations';
+    const [prodRes, setRes] = await Promise.all([
+      supabase.from('products').select('*'),
+      supabase.from('store_settings').select(settingsCols).eq('id', 1).maybeSingle(),
+    ]);
+
+    const products = !prodRes.error && prodRes.data
+      ? prodRes.data.map((r) => mapProductFromRow(r as Record<string, unknown>))
+      : memoryStore.products;
+    const settingsRow = setRes.data as Record<string, unknown> | null;
+    const resolvedSf =
+      resolveStorefrontFromRow(settingsRow) || memoryStore.settings.storefrontConfig;
+
+    return {
+      products,
+      storeName: settingsRow?.store_name
+        ? String(settingsRow.store_name)
+        : memoryStore.settings.storeName,
+      currencySymbol: settingsRow?.currency_symbol
+        ? String(settingsRow.currency_symbol)
+        : memoryStore.settings.currencySymbol,
+      orderNotification: {
+        enabled: resolvedSf.orderNotification?.enabled ?? true,
+        recipientEmail:
+          resolvedSf.orderNotification?.recipientEmail?.trim() || 'pintozacarias806@gmail.com',
+      },
+    };
+  }
+
+  const sf = memoryStore.settings.storefrontConfig;
+  return {
+    products: memoryStore.products,
+    storeName: memoryStore.settings.storeName,
+    currencySymbol: memoryStore.settings.currencySymbol,
+    orderNotification: {
+      enabled: sf.orderNotification?.enabled ?? true,
+      recipientEmail:
+        sf.orderNotification?.recipientEmail?.trim() || 'pintozacarias806@gmail.com',
+    },
+  };
+}
+
+export async function recordOrderNotificationInStore(
+  record: OrderNotificationRecord
+): Promise<void> {
+  memoryStore.orderNotifications = [
+    record,
+    ...memoryStore.orderNotifications.filter((n) => n.id !== record.id),
+  ].slice(0, 100);
+
+  const supabase = getSupabaseClient();
+  if (!supabase) return;
+  try {
+    const { data: currentRowData } = await supabase
+      .from('store_settings')
+      .select('integrations')
+      .eq('id', 1)
+      .maybeSingle();
+    const currentRow = currentRowData as Record<string, unknown> | null;
+    const {
+      integrations: currentIntegrations,
+      embeddedConfig: currentEmbeddedConfig,
+      embeddedCosts,
+      embeddedEvents,
+      embeddedNotifications,
+    } = extractIntegrationsAndConfig(currentRow?.integrations);
+
+    const merged = [
+      record,
+      ...embeddedNotifications.filter((n) => n.id !== record.id),
+    ].slice(0, 100);
+
+    const nextIntegrations = packIntegrationsWithConfig(
+      currentIntegrations,
+      currentEmbeddedConfig ? mergeStorefrontConfig(currentEmbeddedConfig) : null,
+      embeddedCosts,
+      embeddedEvents,
+      merged
+    );
+
+    await supabase.from('store_settings').update({ integrations: nextIntegrations }).eq('id', 1);
+  } catch {
+    // Non-fatal log persistence error
+  }
+}
+
+export async function getOrderNotificationsInStore(): Promise<OrderNotificationRecord[]> {
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { data: rowData } = await supabase
+        .from('store_settings')
+        .select('integrations')
+        .eq('id', 1)
+        .maybeSingle();
+      const row = rowData as Record<string, unknown> | null;
+      const { embeddedNotifications } = extractIntegrationsAndConfig(row?.integrations);
+      if (embeddedNotifications.length > 0) {
+        const mergedMap = new Map<string, OrderNotificationRecord>();
+        for (const n of embeddedNotifications) mergedMap.set(n.id, n);
+        for (const n of memoryStore.orderNotifications) {
+          if (!mergedMap.has(n.id)) mergedMap.set(n.id, n);
+        }
+        return Array.from(mergedMap.values())
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+          .slice(0, 100);
+      }
+    } catch {
+      // Fallback to memory store
+    }
+  }
+  return memoryStore.orderNotifications.slice(0, 100);
 }

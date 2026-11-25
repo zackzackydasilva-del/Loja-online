@@ -160,6 +160,10 @@ export const DEFAULT_STOREFRONT_CONFIG: StorefrontConfig = {
     productId: '',
     buttonUrl: '',
   },
+  orderNotification: {
+    enabled: true,
+    recipientEmail: 'pintozacarias806@gmail.com',
+  },
   catalogEyebrow: 'Catálogo',
   catalogTitle: 'As Nossas Escolhas Favoritas',
   guarantees: [

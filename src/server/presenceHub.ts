@@ -4,6 +4,7 @@ import type { Response } from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
 import type {
   LiveVisitorSession,
+  OrderNotificationRecord,
   StoreAnalyticsEvent,
   StoreOrder,
   VisitorStage,
@@ -78,6 +79,10 @@ function broadcastToAdmins(message: { type: string; payload: unknown }) {
       sseAdminClients.delete(res);
     }
   }
+}
+
+export function broadcastOrderNotification(record: OrderNotificationRecord): void {
+  broadcastToAdmins({ type: 'order:notification', payload: record });
 }
 
 function sanitizeText(val: unknown, max = 120): string | undefined {

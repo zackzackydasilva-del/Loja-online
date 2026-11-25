@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   BarChart3,
@@ -8,6 +8,7 @@ import {
   CreditCard,
   LayoutDashboard,
   LogOut,
+  Mail,
   Menu,
   Package,
   Plus,
@@ -21,6 +22,8 @@ import {
 } from 'lucide-react';
 import { ASSETS } from '../../data/seedData';
 import { useStore } from '../../context/StoreContext';
+import { OrderNotificationRecord } from '../../types/store';
+import { formatMoney } from '../../utils/currency';
 import { SafeImage } from '../SafeImage';
 
 export type AdminTab =
@@ -58,13 +61,70 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
   onAdminSearchChange,
   children,
 }) => {
-  const { setActiveAppView, products, orders, settings, addIntegration, logoutAdmin } = useStore();
+  const { setActiveAppView, products, orders, settings, addIntegration, logoutAdmin, adminToken } =
+    useStore();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [orderNotifications, setOrderNotifications] = useState<OrderNotificationRecord[]>([]);
+  const [liveToastNotification, setLiveToastNotification] =
+    useState<OrderNotificationRecord | null>(null);
   const [channelModalOpen, setChannelModalOpen] = useState(false);
   const [newChannelName, setNewChannelName] = useState('');
   const [newChannelRole, setNewChannelRole] = useState('');
+
+  useEffect(() => {
+    if (!adminToken) return;
+    let active = true;
+
+    fetch('/api/admin/notifications', {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { notifications?: OrderNotificationRecord[] } | null) => {
+        if (!active || !data?.notifications) return;
+        setOrderNotifications(data.notifications);
+      })
+      .catch(() => {
+        // Ignore non-fatal fetch error
+      });
+
+    const es = new EventSource(
+      `/api/admin/analytics/stream?token=${encodeURIComponent(adminToken)}`
+    );
+
+    es.onmessage = (event) => {
+      try {
+        const parsed = JSON.parse(event.data) as {
+          type?: string;
+          payload?: OrderNotificationRecord;
+        };
+        if (parsed.type === 'order:notification' && parsed.payload) {
+          const notif = parsed.payload;
+          setOrderNotifications((prev) => [
+            notif,
+            ...prev.filter((n) => n.id !== notif.id),
+          ].slice(0, 50));
+          setLiveToastNotification(notif);
+        }
+      } catch {
+        // Ignore malformed SSE event
+      }
+    };
+
+    return () => {
+      active = false;
+      es.close();
+    };
+  }, [adminToken]);
+
+  useEffect(() => {
+    if (!liveToastNotification) return;
+    const timer = window.setTimeout(() => {
+      setLiveToastNotification(null);
+    }, 9000);
+    return () => window.clearTimeout(timer);
+  }, [liveToastNotification]);
 
   const alerts = useMemo(() => {
     const lowStock = products
@@ -369,9 +429,11 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
 
               {/* Notifications Popover */}
               {notificationsOpen && (
-                <div className="absolute right-0 top-12 z-30 w-80 bg-white rounded-2xl shadow-xl border border-black/8 p-4 space-y-3">
+                <div className="absolute right-0 top-12 z-30 w-96 max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-xl border border-black/8 p-4 space-y-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-[#1C1C1E]">Alertas Operacionais</span>
+                    <span className="text-xs font-semibold text-[#1C1C1E]">
+                      Notificações & Alertas
+                    </span>
                     <button
                       type="button"
                       onClick={() => setNotificationsOpen(false)}
@@ -380,10 +442,44 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
                       Fechar
                     </button>
                   </div>
-                  {alerts.length === 0 ? (
+                  {orderNotifications.length === 0 && alerts.length === 0 ? (
                     <p className="text-xs text-[#72726E]">Sem alertas pendentes neste momento.</p>
                   ) : (
-                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                    <div className="space-y-2.5 max-h-80 overflow-y-auto pr-0.5">
+                      {orderNotifications.slice(0, 6).map((notif) => (
+                        <button
+                          key={notif.id}
+                          type="button"
+                          onClick={() => {
+                            onSelectTab('orders');
+                            setNotificationsOpen(false);
+                          }}
+                          className="w-full text-left p-3 rounded-xl bg-[#1C1C1E] text-white hover:bg-[#2C2C2E] transition-colors cursor-pointer space-y-1"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider text-white/75">
+                              <Mail className="w-3 h-3" />
+                              <span>{notif.recipientEmail}</span>
+                            </span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/15 text-white">
+                              {notif.emailStatus === 'sent'
+                                ? 'Email enviado'
+                                : notif.emailStatus === 'disabled'
+                                ? 'Desativado'
+                                : 'Configurar SMTP'}
+                            </span>
+                          </div>
+                          <p className="text-xs font-semibold leading-snug">{notif.title}</p>
+                          {notif.items.map((item, idx) => (
+                            <p
+                              key={`${notif.id}-${idx}`}
+                              className="text-[11px] text-white/80 line-clamp-2"
+                            >
+                              {item.name} ({item.quantity} un.): {item.description}
+                            </p>
+                          ))}
+                        </button>
+                      ))}
                       {alerts.map((alert) => (
                         <button
                           key={alert.id}
@@ -482,6 +578,56 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
               </button>
             </div>
           </form>
+        </div>
+      )}
+      {/* Real-time Live Order Notification Toast */}
+      {liveToastNotification && (
+        <div className="fixed bottom-5 right-5 z-50 w-[340px] max-w-[calc(100vw-2rem)] bg-[#1C1C1E] text-white rounded-2xl p-4 shadow-2xl border border-white/10 space-y-2">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <Mail className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span className="text-[11px] uppercase tracking-wider font-semibold text-white/80 truncate">
+                Nova Encomenda em Tempo Real
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setLiveToastNotification(null)}
+              aria-label="Fechar notificação"
+              className="text-white/70 hover:text-white cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <p className="text-sm font-semibold leading-snug">{liveToastNotification.title}</p>
+          <p className="text-xs text-white/80">
+            {liveToastNotification.customerName} ·{' '}
+            {formatMoney(liveToastNotification.total, liveToastNotification.currencySymbol)}
+          </p>
+          <div className="space-y-1 max-h-28 overflow-y-auto">
+            {liveToastNotification.items.map((item, idx) => (
+              <p key={`${liveToastNotification.id}-toast-${idx}`} className="text-[11px] text-white/75">
+                {item.name} ({item.quantity}): {item.description}
+              </p>
+            ))}
+          </div>
+          <div className="flex items-center justify-between pt-1 text-[11px]">
+            <span className="text-white/70 truncate">
+              {liveToastNotification.emailStatus === 'sent'
+                ? `Enviado: ${liveToastNotification.recipientEmail}`
+                : `Destino: ${liveToastNotification.recipientEmail}`}
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                onSelectTab('orders');
+                setLiveToastNotification(null);
+              }}
+              className="font-semibold underline hover:text-white cursor-pointer shrink-0"
+            >
+              Ver Encomenda
+            </button>
+          </div>
         </div>
       )}
     </div>
