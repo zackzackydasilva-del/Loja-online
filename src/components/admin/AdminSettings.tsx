@@ -1,5 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ArrowDown,
+  ArrowUp,
   Check,
   LayoutTemplate,
   Lock,
@@ -8,15 +10,24 @@ import {
   SlidersHorizontal,
   Sparkles,
   Star,
+  Tag,
   Trash2,
 } from 'lucide-react';
 import { DEFAULT_STOREFRONT_CONFIG } from '../../data/seedData';
 import { useStore } from '../../context/StoreContext';
-import { HighlightCardConfig, ProductCategory, StorefrontConfig } from '../../types/store';
+import {
+  CategoryRenameEntry,
+  CategoryStripItemConfig,
+  HighlightCardConfig,
+  ProductCategory,
+  StorefrontConfig,
+} from '../../types/store';
 import { formatMoney } from '../../utils/currency';
 import { ImageField } from './ImageField';
 
-type SettingsSection = 'geral' | 'banner' | 'destaques' | 'catalogo_rodape';
+type SettingsSection = 'geral' | 'banner' | 'destaques' | 'categorias' | 'catalogo_rodape';
+
+const MAX_HIGHLIGHTS = 4;
 
 function mergeStorefrontConfig(cfg?: Partial<StorefrontConfig>): StorefrontConfig {
   return {
@@ -54,7 +65,7 @@ function mergeStorefrontConfig(cfg?: Partial<StorefrontConfig>): StorefrontConfi
           ? cfg.bottomBanner.slides
           : DEFAULT_STOREFRONT_CONFIG.bottomBanner!.slides,
     },
-    highlights: Array.isArray(cfg?.highlights) ? cfg.highlights : [],
+    highlights: Array.isArray(cfg?.highlights) ? cfg.highlights.slice(0, MAX_HIGHLIGHTS) : [],
     guarantees:
       cfg?.guarantees && cfg.guarantees.length > 0
         ? cfg.guarantees
@@ -98,6 +109,7 @@ export const AdminSettings: React.FC = () => {
   const [saveError, setSaveError] = useState('');
   const [hasUnsaved, setHasUnsaved] = useState(false);
   const hasUnsavedChangesRef = useRef(false);
+  const [categoryRenames, setCategoryRenames] = useState<Record<string, string>>({});
 
   const [newChannelName, setNewChannelName] = useState('');
   const [newChannelRole, setNewChannelRole] = useState('');
@@ -120,7 +132,15 @@ export const AdminSettings: React.FC = () => {
     setThreshold(String(settings.freeShippingThreshold));
     setSupportEmail(settings.supportEmail);
     setSf(mergeStorefrontConfig(settings.storefrontConfig));
+    setCategoryRenames({});
   }, [settings]);
+
+  const dynamicCategoryOptions = useMemo(() => {
+    const names = (sf.categoryStripItems || [])
+      .map((c) => c.category?.trim())
+      .filter((c): c is string => Boolean(c));
+    return ['Todos', ...Array.from(new Set(names))];
+  }, [sf.categoryStripItems]);
 
   const markDirty = () => {
     hasUnsavedChangesRef.current = true;
@@ -154,8 +174,37 @@ export const AdminSettings: React.FC = () => {
     setSf(nextSf);
   };
 
-  const persistStorefrontDraft = async (nextSf: StorefrontConfig) => {
-    setSf(nextSf);
+  const persistStorefrontDraft = async (
+    nextSf: StorefrontConfig,
+    renamesOverride?: Record<string, string>
+  ) => {
+    const cleanedCategoryStrip = (nextSf.categoryStripItems || [])
+      .map((item) => {
+        const cleanLabel = item.label.trim() || item.category.trim();
+        const cleanCategory = item.category.trim() || cleanLabel;
+        return {
+          ...item,
+          label: cleanLabel,
+          category: cleanCategory,
+        };
+      })
+      .filter((item) => item.label && item.category);
+
+    const preparedSf: StorefrontConfig = {
+      ...nextSf,
+      categoryStripItems:
+        cleanedCategoryStrip.length > 0
+          ? cleanedCategoryStrip
+          : DEFAULT_STOREFRONT_CONFIG.categoryStripItems,
+      highlights: (nextSf.highlights || []).slice(0, MAX_HIGHLIGHTS),
+    };
+
+    const activeRenamesMap = renamesOverride ?? categoryRenames;
+    const renameEntries: CategoryRenameEntry[] = Object.entries(activeRenamesMap)
+      .filter(([from, to]) => from.trim() && to.trim() && from.trim() !== to.trim())
+      .map(([from, to]) => ({ from: from.trim(), to: to.trim() }));
+
+    setSf(preparedSf);
     setSaving(true);
     setSaveError('');
     setSavedNotice(false);
@@ -165,10 +214,12 @@ export const AdminSettings: React.FC = () => {
         currencySymbol: currencySymbol.trim() || settings.currencySymbol || 'Kz',
         freeShippingThreshold: Math.max(0, Number(threshold) || 0),
         supportEmail: supportEmail.trim(),
-        storefrontConfig: nextSf,
+        storefrontConfig: preparedSf,
+        categoryRenames: renameEntries,
       });
       hasUnsavedChangesRef.current = false;
       setHasUnsaved(false);
+      setCategoryRenames({});
       setSavedNotice(true);
       setTimeout(() => setSavedNotice(false), 3500);
     } catch (err) {
@@ -238,6 +289,7 @@ export const AdminSettings: React.FC = () => {
     { id: 'geral', label: 'Geral, Marca & Menu', icon: SlidersHorizontal },
     { id: 'banner', label: 'Banners da Loja (Topo & Rodapé)', icon: Sparkles },
     { id: 'destaques', label: 'Destaques', icon: Star },
+    { id: 'categorias', label: 'Categorias', icon: Tag },
     { id: 'catalogo_rodape', label: 'Catálogo, Código Promo & Rodapé', icon: LayoutTemplate },
   ];
 
@@ -963,13 +1015,11 @@ export const AdminSettings: React.FC = () => {
                         }
                         className="w-full border border-black/15 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#1C1C1E]"
                       >
-                        {(['Todos', 'Mulher', 'Homem', 'Vestidos', 'Tops', 'Calçado', 'Malas', 'Acessórios', 'Saldos'] as const).map(
-                          (cat) => (
-                            <option key={cat} value={cat}>
-                              {cat}
-                            </option>
-                          )
-                        )}
+                        {dynamicCategoryOptions.map((cat) => (
+                          <option key={cat} value={cat}>
+                            {cat}
+                          </option>
+                        ))}
                       </select>
                     </div>
                   </div>
@@ -1124,10 +1174,13 @@ export const AdminSettings: React.FC = () => {
         </div>
       )}
 
-      {/* SECTION 2.5: DESTAQUES */}
+      {/* SECTION 2.5: DESTAQUES (ATÉ 4 EM CARROSSEL 2s) */}
       {section === 'destaques' && (() => {
-        const highlights = sf.highlights || [];
+        const highlights = (sf.highlights || []).slice(0, MAX_HIGHLIGHTS);
+        const canAddMore = highlights.length < MAX_HIGHLIGHTS;
+
         const addHighlight = () => {
+          if (highlights.length >= MAX_HIGHLIGHTS) return;
           const nextItem: HighlightCardConfig = {
             id: `hl-${Date.now()}`,
             badge: 'Destaque',
@@ -1138,12 +1191,21 @@ export const AdminSettings: React.FC = () => {
             targetCategory: 'Todos',
             productId: products[0]?.id || '',
           };
-          updateSfDraft({ ...sf, highlights: [...highlights, nextItem] });
+          updateSfDraft({ ...sf, highlights: [...highlights, nextItem].slice(0, MAX_HIGHLIGHTS) });
         };
 
         const updateHighlightAt = (idx: number, patch: Partial<HighlightCardConfig>) => {
           const next = [...highlights];
           next[idx] = { ...next[idx], ...patch };
+          updateSfDraft({ ...sf, highlights: next.slice(0, MAX_HIGHLIGHTS) });
+        };
+
+        const moveHighlight = (idx: number, dir: -1 | 1) => {
+          const targetIdx = idx + dir;
+          if (targetIdx < 0 || targetIdx >= highlights.length) return;
+          const next = [...highlights];
+          const [moved] = next.splice(idx, 1);
+          next.splice(targetIdx, 0, moved);
           updateSfDraft({ ...sf, highlights: next });
         };
 
@@ -1154,24 +1216,25 @@ export const AdminSettings: React.FC = () => {
 
         return (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-            {/* Cartões de Destaque (Criar & Editar) */}
+            {/* Cartões de Destaque (Criar & Editar até 4) */}
             <div className="lg:col-span-7 bg-white rounded-[24px] p-6 border border-black/5 space-y-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <h3 className="text-base font-semibold text-[#1C1C1E]">
-                    Destaques da Vitrine ({highlights.length})
+                    Destaques da Vitrine ({highlights.length}/{MAX_HIGHLIGHTS})
                   </h3>
                   <p className="text-[11px] text-[#72726E] mt-0.5">
-                    Crie e edite cartões de destaque exclusivos na página principal da loja e ligue cada um a um produto ou categoria.
+                    Coloque até 4 destaques. Na loja aparecem em carrossel por baixo de &ldquo;As Nossas Escolhas Favoritas&rdquo;, alternando a cada 2 segundos com foto completa e detalhes na borda inferior escura.
                   </p>
                 </div>
                 <button
                   type="button"
+                  disabled={!canAddMore}
                   onClick={addHighlight}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-[#1C1C1E] text-white text-xs font-medium hover:bg-[#323235] cursor-pointer shrink-0"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-[#1C1C1E] text-white text-xs font-medium hover:bg-[#323235] disabled:opacity-45 disabled:cursor-not-allowed cursor-pointer shrink-0"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  <span>Criar Destaque</span>
+                  <span>{canAddMore ? 'Criar Destaque' : 'Máximo 4/4'}</span>
                 </button>
               </div>
 
@@ -1198,14 +1261,36 @@ export const AdminSettings: React.FC = () => {
                         <span className="text-xs font-mono font-semibold text-[#1C1C1E]">
                           Destaque #{String(idx + 1).padStart(2, '0')}
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => removeHighlightAt(idx)}
-                          className="inline-flex items-center gap-1 text-[11px] text-red-700 hover:underline cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          <span>Eliminar</span>
-                        </button>
+                        <div className="flex items-center gap-2">
+                          {idx > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => moveHighlight(idx, -1)}
+                              aria-label="Mover destaque para cima"
+                              className="p-1.5 rounded-lg bg-white border border-black/10 text-[#1C1C1E] hover:bg-black/5 cursor-pointer"
+                            >
+                              <ArrowUp className="w-3 h-3" />
+                            </button>
+                          )}
+                          {idx < highlights.length - 1 && (
+                            <button
+                              type="button"
+                              onClick={() => moveHighlight(idx, 1)}
+                              aria-label="Mover destaque para baixo"
+                              className="p-1.5 rounded-lg bg-white border border-black/10 text-[#1C1C1E] hover:bg-black/5 cursor-pointer"
+                            >
+                              <ArrowDown className="w-3 h-3" />
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => removeHighlightAt(idx)}
+                            className="inline-flex items-center gap-1 text-[11px] text-red-700 hover:underline cursor-pointer ml-1"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Eliminar</span>
+                          </button>
+                        </div>
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1237,7 +1322,7 @@ export const AdminSettings: React.FC = () => {
 
                         <div className="sm:col-span-2">
                           <label className="block text-[11px] font-medium text-[#555552] mb-1">
-                            Descrição Curta
+                            Descrição & Detalhes (aparece na borda inferior escura)
                           </label>
                           <input
                             type="text"
@@ -1293,19 +1378,7 @@ export const AdminSettings: React.FC = () => {
                               }
                               className="w-full bg-white border border-black/15 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#1C1C1E]"
                             >
-                              {(
-                                [
-                                  'Todos',
-                                  'Mulher',
-                                  'Homem',
-                                  'Vestidos',
-                                  'Tops',
-                                  'Calçado',
-                                  'Malas',
-                                  'Acessórios',
-                                  'Saldos',
-                                ] as const
-                              ).map((cat) => (
+                              {dynamicCategoryOptions.map((cat) => (
                                 <option key={cat} value={cat}>
                                   {cat}
                                 </option>
@@ -1316,9 +1389,11 @@ export const AdminSettings: React.FC = () => {
                       </div>
 
                       <ImageField
-                        label="Fotografia do Destaque"
+                        label="Fotografia Completa do Destaque"
                         recommendedSize="1200 × 900 px"
                         value={hl.image}
+                        allowEmpty
+                        uploadFolder="banners"
                         onChange={(url) => updateHighlightAt(idx, { image: url })}
                       />
                     </div>
@@ -1353,13 +1428,13 @@ export const AdminSettings: React.FC = () => {
                     Secção & Produtos em Destaque
                   </h3>
                   <p className="text-[11px] text-[#72726E] mt-0.5">
-                    Personalize o título do carrossel e escolha rapidamente quais peças aparecem nos destaques da loja.
+                    Personalize o título do carrossel de produtos e escolha quais peças aparecem primeiro em &ldquo;As Nossas Escolhas Favoritas&rdquo;.
                   </p>
                 </div>
 
                 <div>
                   <label className="block text-xs font-medium text-[#555552] mb-1">
-                    Título do Carrossel de Destaques
+                    Título do Carrossel de Produtos
                   </label>
                   <input
                     type="text"
@@ -1402,6 +1477,241 @@ export const AdminSettings: React.FC = () => {
                   )}
                 </div>
               </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* SECTION 2.8: CATEGORIAS */}
+      {section === 'categorias' && (() => {
+        const categories = sf.categoryStripItems || [];
+
+        const trackRename = (oldCat: string, newCat: string) => {
+          const cleanOld = oldCat.trim();
+          const cleanNew = newCat.trim();
+          if (!cleanOld || !cleanNew || cleanOld === cleanNew) return;
+          setCategoryRenames((prev) => {
+            const next = { ...prev };
+            const existingOrigin = Object.entries(next).find(([, mapped]) => mapped === cleanOld)?.[0];
+            if (existingOrigin) {
+              next[existingOrigin] = cleanNew;
+            } else {
+              next[cleanOld] = cleanNew;
+            }
+            return next;
+          });
+        };
+
+        const addCategory = () => {
+          const baseName = `Nova Categoria ${categories.length + 1}`;
+          const nextItem: CategoryStripItemConfig = {
+            label: baseName,
+            category: baseName,
+            image: '',
+            isSale: false,
+          };
+          updateSfDraft({
+            ...sf,
+            categoryStripItems: [...categories, nextItem],
+          });
+        };
+
+        const updateCategoryName = (idx: number, nextName: string) => {
+          const prevItem = categories[idx];
+          if (!prevItem) return;
+          const oldCat = prevItem.category;
+          const cleanNext = nextName;
+          const nextStrip = [...categories];
+          nextStrip[idx] = {
+            ...prevItem,
+            label: cleanNext,
+            category: cleanNext.trim() || prevItem.category,
+          };
+
+          const targetName = cleanNext.trim();
+          let nextEditorial = sf.editorialCards;
+          let nextPromo = sf.promoBanners;
+          let nextHighlights = sf.highlights;
+          let nextBottom = sf.bottomBanner;
+
+          if (oldCat && targetName && oldCat !== targetName) {
+            trackRename(oldCat, targetName);
+            nextEditorial = sf.editorialCards.map((c) =>
+              c.category === oldCat ? { ...c, category: targetName } : c
+            );
+            nextPromo = sf.promoBanners.map((b) =>
+              b.targetCategory === oldCat ? { ...b, targetCategory: targetName } : b
+            );
+            nextHighlights = (sf.highlights || []).map((h) =>
+              h.targetCategory === oldCat ? { ...h, targetCategory: targetName } : h
+            );
+            if (sf.bottomBanner && sf.bottomBanner.targetCategory === oldCat) {
+              nextBottom = { ...sf.bottomBanner, targetCategory: targetName };
+            }
+          }
+
+          updateSfDraft({
+            ...sf,
+            categoryStripItems: nextStrip,
+            editorialCards: nextEditorial,
+            promoBanners: nextPromo,
+            highlights: nextHighlights,
+            bottomBanner: nextBottom,
+          });
+        };
+
+        const updateCategoryFields = (idx: number, patch: Partial<CategoryStripItemConfig>) => {
+          const next = [...categories];
+          next[idx] = { ...next[idx], ...patch };
+          updateSfDraft({ ...sf, categoryStripItems: next });
+        };
+
+        const moveCategory = (idx: number, dir: -1 | 1) => {
+          const targetIdx = idx + dir;
+          if (targetIdx < 0 || targetIdx >= categories.length) return;
+          const next = [...categories];
+          const [moved] = next.splice(idx, 1);
+          next.splice(targetIdx, 0, moved);
+          updateSfDraft({ ...sf, categoryStripItems: next });
+        };
+
+        const removeCategory = (idx: number) => {
+          if (categories.length <= 1) return;
+          const filtered = categories.filter((_, i) => i !== idx);
+          void persistStorefrontDraft({ ...sf, categoryStripItems: filtered });
+        };
+
+        return (
+          <div className="bg-white rounded-[24px] p-6 border border-black/5 space-y-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-[#1C1C1E]">
+                  Gerir Categorias da Loja ({categories.length})
+                </h3>
+                <p className="text-[11px] text-[#72726E] mt-0.5">
+                  Edite nomes, imagens, ordem ou crie novas categorias. As alterações refletem-se nos filtros do catálogo, na barra da loja e no formulário de produtos.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={addCategory}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-[#1C1C1E] text-white text-xs font-medium hover:bg-[#323235] cursor-pointer shrink-0"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Nova Categoria</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {categories.map((catItem, idx) => {
+                const matchingCount = products.filter(
+                  (p) => p.category === catItem.category
+                ).length;
+
+                return (
+                  <div
+                    key={`cat-edit-${idx}`}
+                    className="p-4 rounded-2xl bg-[#F6F6F4] border border-black/6 space-y-3"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-mono font-semibold text-[#1C1C1E]">
+                          #{String(idx + 1).padStart(2, '0')}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full bg-white text-[10px] font-medium text-[#555552] border border-black/8">
+                          {matchingCount} {matchingCount === 1 ? 'produto' : 'produtos'}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        {idx > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => moveCategory(idx, -1)}
+                            aria-label="Mover categoria para cima"
+                            className="p-1.5 rounded-lg bg-white border border-black/10 text-[#1C1C1E] hover:bg-black/5 cursor-pointer"
+                          >
+                            <ArrowUp className="w-3 h-3" />
+                          </button>
+                        )}
+                        {idx < categories.length - 1 && (
+                          <button
+                            type="button"
+                            onClick={() => moveCategory(idx, 1)}
+                            aria-label="Mover categoria para baixo"
+                            className="p-1.5 rounded-lg bg-white border border-black/10 text-[#1C1C1E] hover:bg-black/5 cursor-pointer"
+                          >
+                            <ArrowDown className="w-3 h-3" />
+                          </button>
+                        )}
+                        {categories.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeCategory(idx)}
+                            aria-label={`Eliminar categoria ${catItem.label}`}
+                            className="p-1.5 rounded-lg hover:bg-red-50 text-red-700 cursor-pointer ml-1"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-medium text-[#555552] mb-1">
+                        Nome da Categoria
+                      </label>
+                      <input
+                        type="text"
+                        value={catItem.label}
+                        onChange={(e) => updateCategoryName(idx, e.target.value)}
+                        placeholder="Ex: Vestidos, Calças, Acessórios..."
+                        className="w-full bg-white border border-black/15 rounded-xl px-3 py-2 text-xs font-medium text-[#1C1C1E] focus:outline-none focus:border-[#1C1C1E]"
+                      />
+                    </div>
+
+                    <label className="inline-flex items-center gap-2 text-xs text-[#1C1C1E] cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(catItem.isSale)}
+                        onChange={(e) => updateCategoryFields(idx, { isSale: e.target.checked })}
+                        className="rounded"
+                      />
+                      <span>Categoria promocional (mostra etiqueta escura Saldos e filtra promoções)</span>
+                    </label>
+
+                    {!catItem.isSale && (
+                      <ImageField
+                        label="Imagem Circular da Categoria (opcional)"
+                        recommendedSize="400 × 400 px"
+                        value={catItem.image || ''}
+                        allowEmpty
+                        compact
+                        uploadFolder="banners"
+                        onChange={(url) => updateCategoryFields(idx, { image: url })}
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="pt-3 border-t border-black/6 flex flex-wrap items-center justify-end gap-3">
+              {savedNotice && (
+                <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+                  <Check className="w-4 h-4" />
+                  <span>Categorias guardadas na base de dados</span>
+                </span>
+              )}
+              {saveError && <span className="text-xs text-red-700">{saveError}</span>}
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => handleSaveAll()}
+                className="px-5 py-2.5 bg-[#1C1C1E] text-white text-xs font-medium rounded-full hover:bg-[#323235] disabled:opacity-60 cursor-pointer whitespace-nowrap shrink-0"
+              >
+                {saving ? 'A guardar...' : 'Guardar Categorias'}
+              </button>
             </div>
           </div>
         );

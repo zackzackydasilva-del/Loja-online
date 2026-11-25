@@ -891,6 +891,18 @@ app.patch('/api/admin/settings', requireAdminAuth, async (req, res) => {
             .map((s: any) => ({ ...s, image: s.image.trim() === '' ? '' : s.image }));
         }
       }
+      if (Array.isArray(cfg.highlights)) {
+        cfg.highlights = cfg.highlights
+          .filter((h: any) => h && typeof h === 'object')
+          .slice(0, 4)
+          .map((h: any) => {
+            const rawImg = typeof h.image === 'string' ? h.image.trim() : '';
+            return {
+              ...h,
+              image: rawImg === '' || !isSafeAssetUrl(rawImg) ? '' : rawImg,
+            };
+          });
+      }
       if (cfg.newsletter?.image !== undefined) {
         const nlImg = String(cfg.newsletter.image).trim();
         if (!nlImg) {
@@ -902,7 +914,24 @@ app.patch('/api/admin/settings', requireAdminAuth, async (req, res) => {
       updates.storefrontConfig = cfg;
     }
 
-    const savedSettings = await updateSettingsInStore(updates);
+    const categoryRenames = Array.isArray(body.categoryRenames)
+      ? body.categoryRenames
+          .filter(
+            (r: any) =>
+              r &&
+              typeof r.from === 'string' &&
+              typeof r.to === 'string' &&
+              r.from.trim() &&
+              r.to.trim() &&
+              r.from.trim() !== r.to.trim()
+          )
+          .map((r: any) => ({
+            from: r.from.trim().slice(0, 60),
+            to: r.to.trim().slice(0, 60),
+          }))
+      : [];
+
+    const savedSettings = await updateSettingsInStore(updates, categoryRenames);
     res.json({ ok: true, settings: savedSettings });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Erro ao guardar definições.';

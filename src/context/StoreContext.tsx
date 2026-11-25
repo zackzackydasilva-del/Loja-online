@@ -176,7 +176,9 @@ interface StoreContextValue {
   deleteCost: (costId: string) => Promise<void>;
   toggleIntegration: (integrationId: string) => Promise<void>;
   addIntegration: (name: string, role: string) => Promise<void>;
-  updateSettings: (updates: Partial<StoreSettings>) => Promise<void>;
+  updateSettings: (
+    updates: Partial<StoreSettings> & { categoryRenames?: { from: string; to: string }[] }
+  ) => Promise<void>;
   subscribeNewsletter: (email: string) => Promise<boolean>;
   submitProfileEmail: (
     email: string
@@ -692,12 +694,17 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     await updateSettings({ integrations: updated });
   };
 
-  const updateSettings = async (updates: Partial<StoreSettings>) => {
+  const updateSettings = async (
+    updates: Partial<StoreSettings> & { categoryRenames?: { from: string; to: string }[] }
+  ) => {
     const res = await authFetch('/api/admin/settings', {
       method: 'PATCH',
       body: JSON.stringify(updates),
     });
     const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data?.error || 'Erro ao guardar definições.');
+    }
     if (data?.settings) {
       setSettings((prev) => ({ ...prev, ...data.settings }));
     }

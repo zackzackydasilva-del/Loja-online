@@ -7,6 +7,7 @@ import {
   getLastBootstrapDiagnostic,
 } from './supabaseBootstrap.ts';
 import type {
+  CategoryRenameEntry,
   LiveVisitorSession,
   OrderItemSummary,
   OrderStatus,
@@ -46,6 +47,17 @@ const CATEGORIES_SEED: { slug: string; name: ProductCategory; sort_order: number
   { slug: 'acessorios', name: 'Acessórios', sort_order: 7 },
   { slug: 'saldos', name: 'Saldos', sort_order: 8 },
 ];
+
+function slugifyCategory(name: string): string {
+  const base = name
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return base || `cat-${Date.now()}`;
+}
 
 const LEGACY_DEMO_PRODUCT_IDS = [
   'prod-1',
@@ -106,7 +118,7 @@ function mergeStorefrontConfig(raw: unknown): StorefrontConfig {
           ? obj.bottomBanner.slides
           : DEFAULT_STOREFRONT_CONFIG.bottomBanner!.slides,
     },
-    highlights: Array.isArray(obj.highlights) ? obj.highlights : [],
+    highlights: Array.isArray(obj.highlights) ? obj.highlights.slice(0, 4) : [],
     guarantees:
       Array.isArray(obj.guarantees) && obj.guarantees.length > 0
         ? obj.guarantees
@@ -152,7 +164,7 @@ function mergeStorefrontConfigPatch(
               : baseBottom.slides,
         }
       : baseBottom,
-    highlights: Array.isArray(patch.highlights) ? patch.highlights : base.highlights || [],
+    highlights: (Array.isArray(patch.highlights) ? patch.highlights : base.highlights || []).slice(0, 4),
     newsletter: {
       ...base.newsletter,
       ...(patch.newsletter || {}),
@@ -960,9 +972,16 @@ async function ensureSupabaseSeeded(supabase: SupabaseClient): Promise<boolean> 
 
       // Best-effort secondary seed/cleanup steps — never block reading products or settings if non-fatal
       try {
-        const catRes = await supabase.from('categories').upsert(CATEGORIES_SEED, { onConflict: 'slug' });
-        if (catRes.error) {
-          console.warn('Supabase categories seed warning:', catRes.error.message);
+        const { count: catCount } = await supabase
+          .from('categories')
+          .select('slug', { count: 'exact', head: true });
+        if ((catCount ?? 0) === 0) {
+          const catRes = await supabase
+            .from('categories')
+            .upsert(CATEGORIES_SEED, { onConflict: 'slug', ignoreDuplicates: true });
+          if (catRes.error) {
+            console.warn('Supabase categories seed warning:', catRes.error.message);
+          }
         }
 
         const [{ data: legacyProdCheck }, { data: legacyOrderCheck }, { data: legacyGoalCheck }] =
@@ -2408,10 +2427,7 @@ export async function createProductInStore(
       );
     }
 
-    const slug = created.category
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '');
+    const slug = slugifyCategory(created.category);
     await supabase
       .from('categories')
       .upsert(
@@ -2420,7 +2436,7 @@ export async function createProductInStore(
           name: created.category,
           sort_order: 9,
         },
-        { onConflict: 'slug' }
+        { onConflict: 'name', ignoreDuplicates: true }
       )
       .then(() => {}, () => {});
 
@@ -2483,11 +2499,11 @@ export async function updateProductInStore(id: string, updates: Partial<Product>
         .from('categories')
         .upsert(
           {
-            slug: updates.category.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''),
+            slug: slugifyCategory(updates.category),
             name: updates.category,
             sort_order: 9,
           },
-          { onConflict: 'slug' }
+          { onConflict: 'name', ignoreDuplicates: true }
         )
         .then(() => {}, () => {});
     }
@@ -2698,15 +2714,71 @@ export async function deleteTaskInStore(id: string) {
 }
 
 export async function updateSettingsInStore(
-  updates: Partial<StoreSettings>
+  updates: Partial<StoreSettings>,
+  categoryRenames: CategoryRenameEntry[] = []
 ): Promise<StoreSettings> {
   if (updates.storefrontConfig !== undefined) {
     memoryStore.settings.storefrontConfig = mergeStorefrontConfig(updates.storefrontConfig);
+  }
+  if (categoryRenames.length > 0) {
+    for (const rename of categoryRenames) {
+      memoryStore.products = memoryStore.products.map((p) =>
+        p.category === rename.from ? { ...p, category: rename.to } : p
+      );
+      memoryStore.campaigns = memoryStore.campaigns.map((c) =>
+        c.category === rename.from ? { ...c, category: rename.to } : c
+      );
+    }
   }
   const supabase = getSupabaseClient();
   assertPersistenceAvailable(supabase);
   if (supabase) {
     await ensureSupabaseSeeded(supabase).catch(() => false);
+
+    // Process category renames first (cascades via FK ON UPDATE CASCADE, with safe merge fallback)
+    if (categoryRenames.length > 0) {
+      for (const rename of categoryRenames) {
+        const fromName = rename.from.trim();
+        const toName = rename.to.trim();
+        if (!fromName || !toName || fromName === toName) continue;
+
+        const { data: existingTarget } = await supabase
+          .from('categories')
+          .select('slug, name')
+          .eq('name', toName)
+          .maybeSingle();
+
+        if (existingTarget) {
+          await supabase.from('products').update({ category: toName }).eq('category', fromName);
+          await supabase.from('campaigns').update({ category: toName }).eq('category', fromName);
+          await supabase.from('categories').delete().eq('name', fromName);
+        } else {
+          const nextSlug = slugifyCategory(toName);
+          const { data: slugConflict } = await supabase
+            .from('categories')
+            .select('slug, name')
+            .eq('slug', nextSlug)
+            .maybeSingle();
+          const finalSlug =
+            slugConflict && slugConflict.name !== fromName
+              ? `${nextSlug}-${Date.now().toString().slice(-4)}`
+              : nextSlug;
+
+          const { error: renErr } = await supabase
+            .from('categories')
+            .update({ name: toName, slug: finalSlug })
+            .eq('name', fromName);
+          if (renErr) {
+            // Fallback: ensure target category exists, reassign products/campaigns manually
+            await supabase
+              .from('categories')
+              .upsert({ slug: finalSlug, name: toName, sort_order: 9 }, { onConflict: 'name', ignoreDuplicates: true });
+            await supabase.from('products').update({ category: toName }).eq('category', fromName);
+            await supabase.from('campaigns').update({ category: toName }).eq('category', fromName);
+          }
+        }
+      }
+    }
 
     // Read current settings row so updates to integrations and storefrontConfig never overwrite each other
     const { data: currentRowData } = await supabase
@@ -2743,6 +2815,32 @@ export async function updateSettingsInStore(
           image: c.image ? await persistImageAsset(supabase, c.image, 'banners') : '',
         }))
       );
+      // Sync all configured categories into public.categories table so products can reference them immediately
+      for (let i = 0; i < merged.categoryStripItems.length; i++) {
+        const catName = String(merged.categoryStripItems[i].category || '').trim();
+        if (!catName) continue;
+        const baseSlug = slugifyCategory(catName);
+        const { data: byName } = await supabase
+          .from('categories')
+          .select('slug')
+          .eq('name', catName)
+          .maybeSingle();
+        if (byName?.slug) {
+          await supabase.from('categories').update({ sort_order: i + 1 }).eq('slug', byName.slug);
+        } else {
+          const { data: bySlug } = await supabase
+            .from('categories')
+            .select('slug')
+            .eq('slug', baseSlug)
+            .maybeSingle();
+          const uniqueSlug = bySlug ? `${baseSlug}-${i + 1}` : baseSlug;
+          await supabase
+            .from('categories')
+            .insert({ slug: uniqueSlug, name: catName, sort_order: i + 1 })
+            .then(() => {}, () => {});
+        }
+      }
+
       merged.editorialCards = await Promise.all(
         merged.editorialCards.map(async (c) => ({
           ...c,
@@ -2763,7 +2861,8 @@ export async function updateSettingsInStore(
           }))
         );
       }
-      if (Array.isArray(merged.highlights) && merged.highlights.length > 0) {
+      merged.highlights = (merged.highlights || []).slice(0, 4);
+      if (merged.highlights.length > 0) {
         merged.highlights = await Promise.all(
           merged.highlights.map(async (h) => ({
             ...h,

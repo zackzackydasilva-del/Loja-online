@@ -1,21 +1,9 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Heart, Plus } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import { Product, ProductCategory } from '../../types/store';
 import { formatMoney } from '../../utils/currency';
 import { SafeImage } from '../SafeImage';
-
-const FILTER_TABS: (ProductCategory | 'Todos')[] = [
-  'Todos',
-  'Mulher',
-  'Homem',
-  'Vestidos',
-  'Tops',
-  'Calçado',
-  'Malas',
-  'Acessórios',
-  'Saldos',
-];
 
 interface ProductGridProps {
   wishlistOnly: boolean;
@@ -41,7 +29,96 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
 
   const [sortBy, setSortBy] = useState<'featured' | 'price-asc' | 'price-desc'>('featured');
   const carouselRef = useRef<HTMLDivElement | null>(null);
+  const highlightsTrackRef = useRef<HTMLDivElement | null>(null);
+  const scrollSyncTimerRef = useRef<number | null>(null);
+  const [activeHighlight, setActiveHighlight] = useState(0);
+  const [highlightsPaused, setHighlightsPaused] = useState(false);
+
   const cfg = settings.storefrontConfig;
+
+  const filterTabs = useMemo<(ProductCategory | 'Todos')[]>(() => {
+    const configured = (cfg.categoryStripItems || [])
+      .map((item) => item.category?.trim())
+      .filter((c): c is string => Boolean(c));
+    const unique: string[] = [];
+    for (const c of configured) {
+      if (!unique.includes(c)) unique.push(c);
+    }
+    if (unique.length === 0) {
+      return ['Todos', 'Mulher', 'Homem', 'Vestidos', 'Tops', 'Calçado', 'Malas', 'Acessórios', 'Saldos'];
+    }
+    return ['Todos', ...unique];
+  }, [cfg.categoryStripItems]);
+
+  const saleCategoryNames = useMemo(() => {
+    const names = new Set<string>(['Saldos']);
+    (cfg.categoryStripItems || []).forEach((c) => {
+      if (c.isSale && c.category) names.add(c.category);
+    });
+    return names;
+  }, [cfg.categoryStripItems]);
+
+  const highlightsList = useMemo(
+    () => (Array.isArray(cfg.highlights) ? cfg.highlights.slice(0, 4) : []),
+    [cfg.highlights]
+  );
+
+  const safeHighlightIdx =
+    highlightsList.length > 0 ? Math.min(activeHighlight, highlightsList.length - 1) : 0;
+
+  const scrollToHighlight = useCallback(
+    (index: number) => {
+      if (highlightsList.length === 0) return;
+      const wrapped =
+        ((index % highlightsList.length) + highlightsList.length) % highlightsList.length;
+      setActiveHighlight(wrapped);
+      const track = highlightsTrackRef.current;
+      if (track) {
+        const slideEl = track.children[wrapped] as HTMLElement | undefined;
+        if (slideEl) {
+          track.scrollTo({
+            left: slideEl.offsetLeft,
+            behavior: 'smooth',
+          });
+        }
+      }
+    },
+    [highlightsList.length]
+  );
+
+  useEffect(() => {
+    if (highlightsList.length <= 1 || highlightsPaused) return;
+    const timer = window.setInterval(() => {
+      setActiveHighlight((prev) => {
+        const next = (prev + 1) % highlightsList.length;
+        const track = highlightsTrackRef.current;
+        if (track) {
+          const slideEl = track.children[next] as HTMLElement | undefined;
+          if (slideEl) {
+            track.scrollTo({
+              left: slideEl.offsetLeft,
+              behavior: 'smooth',
+            });
+          }
+        }
+        return next;
+      });
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [highlightsList.length, highlightsPaused]);
+
+  const handleHighlightsScroll = () => {
+    if (scrollSyncTimerRef.current) {
+      window.clearTimeout(scrollSyncTimerRef.current);
+    }
+    scrollSyncTimerRef.current = window.setTimeout(() => {
+      const track = highlightsTrackRef.current;
+      if (!track || track.clientWidth <= 0) return;
+      const approxIdx = Math.round(track.scrollLeft / track.clientWidth);
+      const clamped = Math.max(0, Math.min(highlightsList.length - 1, approxIdx));
+      setActiveHighlight(clamped);
+    }, 90);
+  };
 
   const favoriteCarouselProducts = useMemo(() => {
     const featured = products.filter((p) => p.featured || wishlist.includes(p.id));
@@ -60,8 +137,8 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
       const matchesCat =
         selectedCategory === 'Todos'
           ? true
-          : selectedCategory === 'Saldos'
-          ? Boolean(p.onSale || p.originalPrice)
+          : saleCategoryNames.has(selectedCategory)
+          ? Boolean(p.onSale || p.originalPrice || p.category === selectedCategory)
           : p.category === selectedCategory;
 
       const matchesSearch =
@@ -76,7 +153,7 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
     if (sortBy === 'price-asc') return [...list].sort((a, b) => a.price - b.price);
     if (sortBy === 'price-desc') return [...list].sort((a, b) => b.price - a.price);
     return list;
-  }, [products, selectedCategory, searchQuery, sortBy, wishlistOnly, wishlist]);
+  }, [products, selectedCategory, saleCategoryNames, searchQuery, sortBy, wishlistOnly, wishlist]);
 
   const handleQuickAdd = (e: React.MouseEvent, product: Product) => {
     e.stopPropagation();
@@ -174,69 +251,6 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
       id="catalog"
       className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 pt-4 lg:pt-6 pb-10 lg:pb-12 space-y-8 lg:space-y-10"
     >
-      {/* CUSTOM VITRINE HIGHLIGHTS (DESTAQUES) */}
-      {Array.isArray(cfg.highlights) && cfg.highlights.length > 0 && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#777777]">
-              Destaques
-            </span>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
-            {cfg.highlights.map((hl) => {
-              const linkedProduct = hl.productId
-                ? products.find((p) => p.id === hl.productId)
-                : undefined;
-              return (
-                <article
-                  key={hl.id}
-                  onClick={() => {
-                    if (linkedProduct) {
-                      setQuickViewProduct(linkedProduct);
-                    } else {
-                      if (wishlistOnly) onResetView();
-                      setSelectedCategory(hl.targetCategory || 'Todos');
-                    }
-                  }}
-                  className="group cursor-pointer rounded-[22px] bg-[#111111] text-white overflow-hidden flex flex-col sm:flex-row md:flex-col justify-between transition-transform duration-200 hover:-translate-y-0.5"
-                >
-                  {hl.image && (
-                    <div className="w-full h-44 sm:w-44 md:w-full sm:h-auto md:h-48 bg-[#1B1B1B] overflow-hidden shrink-0">
-                      <SafeImage
-                        src={hl.image}
-                        alt={hl.title}
-                        className="w-full h-full object-cover object-center transition-transform duration-300 group-hover:scale-[1.03]"
-                      />
-                    </div>
-                  )}
-                  <div className="p-5 flex-1 flex flex-col justify-between gap-3">
-                    <div className="space-y-1.5">
-                      {hl.badge && (
-                        <span className="inline-block px-2.5 py-0.5 rounded-full bg-white/12 text-white text-[10px] font-medium">
-                          {hl.badge}
-                        </span>
-                      )}
-                      <h3 className="text-base sm:text-lg font-semibold leading-snug text-white">
-                        {hl.title}
-                      </h3>
-                      {hl.subtitle && (
-                        <p className="text-xs text-white/70 line-clamp-2">{hl.subtitle}</p>
-                      )}
-                    </div>
-                    <div className="pt-1">
-                      <span className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-white text-[#111111] text-xs font-semibold">
-                        <span>{hl.ctaText || 'Ver Destaque'}</span>
-                        <ChevronRight className="w-3.5 h-3.5" />
-                      </span>
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
       {/* ALWAYS-VISIBLE HORIZONTAL CAROUSEL: "As Nossas Escolhas Favoritas" */}
       <div className="space-y-4">
         <div className="flex items-center justify-between gap-4">
@@ -314,11 +328,131 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
         ) : null}
       </div>
 
+      {/* CUSTOM VITRINE HIGHLIGHTS CAROUSEL (DESTAQUES — POR BAIXO DE "As Nossas Escolhas Favoritas") */}
+      {highlightsList.length > 0 && (
+        <div
+          className="space-y-3"
+          onMouseEnter={() => setHighlightsPaused(true)}
+          onMouseLeave={() => setHighlightsPaused(false)}
+          onTouchStart={() => setHighlightsPaused(true)}
+          onTouchEnd={() => {
+            window.setTimeout(() => setHighlightsPaused(false), 1800);
+          }}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#777777]">
+              Destaques
+            </span>
+            {highlightsList.length > 1 && (
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => scrollToHighlight(safeHighlightIdx - 1)}
+                  aria-label="Destaque anterior"
+                  className="w-8 h-8 rounded-full bg-[#EFEFEF] hover:bg-[#111111] hover:text-white text-[#111111] flex items-center justify-center transition-colors cursor-pointer"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => scrollToHighlight(safeHighlightIdx + 1)}
+                  aria-label="Próximo destaque"
+                  className="w-8 h-8 rounded-full bg-[#EFEFEF] hover:bg-[#111111] hover:text-white text-[#111111] flex items-center justify-center transition-colors cursor-pointer"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div
+            ref={highlightsTrackRef}
+            onScroll={handleHighlightsScroll}
+            className="flex items-stretch overflow-x-auto snap-x snap-mandatory scroll-smooth rounded-[22px] sm:rounded-[28px] [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
+            {highlightsList.map((hl) => {
+              const linkedProduct = hl.productId
+                ? products.find((p) => p.id === hl.productId)
+                : undefined;
+              const hasImg = Boolean(hl.image && hl.image.trim());
+
+              return (
+                <article
+                  key={hl.id}
+                  onClick={() => {
+                    if (linkedProduct) {
+                      setQuickViewProduct(linkedProduct);
+                    } else {
+                      if (wishlistOnly) onResetView();
+                      setSelectedCategory(hl.targetCategory || 'Todos');
+                    }
+                  }}
+                  className="group relative w-full shrink-0 snap-center overflow-hidden bg-[#09090B] text-white cursor-pointer flex items-center justify-center min-h-[260px] sm:min-h-[360px] lg:min-h-[420px]"
+                >
+                  {hasImg ? (
+                    <SafeImage
+                      src={hl.image}
+                      alt={hl.title}
+                      className="w-full h-auto max-h-[540px] lg:max-h-[600px] object-contain mx-auto block"
+                    />
+                  ) : null}
+
+                  {/* Efeito escuro exclusivamente na borda inferior onde ficam descrições e detalhes */}
+                  <div className="absolute inset-x-0 bottom-0 pt-24 sm:pt-32 pb-5 sm:pb-7 px-5 sm:px-8 lg:px-10 bg-gradient-to-t from-[#09090B] via-[#09090B]/90 to-transparent flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+                    <div className="space-y-1.5 max-w-2xl">
+                      {hl.badge && (
+                        <span className="inline-block px-2.5 py-0.5 rounded-full bg-white/15 backdrop-blur-xs text-white text-[10px] font-semibold tracking-wide uppercase">
+                          {hl.badge}
+                        </span>
+                      )}
+                      <h3 className="text-lg sm:text-2xl lg:text-[28px] font-semibold leading-tight text-white">
+                        {hl.title}
+                      </h3>
+                      {hl.subtitle && (
+                        <p className="text-xs sm:text-sm text-white/85 leading-relaxed line-clamp-2">
+                          {hl.subtitle}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="shrink-0 self-start sm:self-end">
+                      <span className="inline-flex items-center gap-1.5 px-4 sm:px-5 py-2 sm:py-2.5 rounded-full bg-white text-[#111111] text-xs font-semibold shadow-sm group-hover:bg-neutral-100 transition-colors">
+                        <span>{hl.ctaText || 'Ver Destaque'}</span>
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </span>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+
+          {highlightsList.length > 1 && (
+            <div className="flex items-center justify-center gap-1.5 pt-1">
+              {highlightsList.map((hl, idx) => {
+                const active = safeHighlightIdx === idx;
+                return (
+                  <button
+                    key={hl.id}
+                    type="button"
+                    onClick={() => scrollToHighlight(idx)}
+                    aria-label={`Ver destaque ${idx + 1}`}
+                    className={`h-1 rounded-full transition-all cursor-pointer ${
+                      active ? 'w-5 bg-[#111111]' : 'w-1.5 bg-black/20 hover:bg-black/40'
+                    }`}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* FILTERABLE CATALOG GRID SECTION */}
       <div className="space-y-4">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 overflow-x-auto pb-1">
-            {FILTER_TABS.map((cat) => {
+            {filterTabs.map((cat) => {
               const active = !wishlistOnly && selectedCategory === cat;
               const label = cat === 'Todos' ? 'Novidades & Destaques' : cat;
               return (

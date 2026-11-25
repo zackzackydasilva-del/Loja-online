@@ -14,7 +14,7 @@ export const CategoryStrip: React.FC<CategoryStripProps> = ({ onSelectCategory }
   return (
     <section className="relative z-10 -mt-10 pb-8 px-6 md:px-10">
       <div className="max-w-[1160px] mx-auto bg-white rounded-2xl border border-[#141413]/8 shadow-[0_12px_36px_-12px_rgba(20,20,19,0.08)] px-6 py-6">
-        <div className="grid grid-cols-4 sm:grid-cols-8 gap-4 items-start justify-items-center">
+        <div className="grid grid-cols-4 sm:flex sm:flex-wrap sm:justify-center gap-4 sm:gap-6 items-start justify-items-center">
           {items.map((item, idx) => {
             const isActive = selectedCategory === item.category;
             return (

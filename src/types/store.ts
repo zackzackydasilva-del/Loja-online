@@ -1,12 +1,9 @@
-export type ProductCategory =
-  | 'Mulher'
-  | 'Homem'
-  | 'Vestidos'
-  | 'Tops'
-  | 'Calçado'
-  | 'Malas'
-  | 'Acessórios'
-  | 'Saldos';
+export type ProductCategory = string;
+
+export type CategoryRenameEntry = {
+  from: string;
+  to: string;
+};
 
 export type OrderStatus = 'Pendente' | 'Em Preparação' | 'Em Trânsito' | 'Entregue';
 

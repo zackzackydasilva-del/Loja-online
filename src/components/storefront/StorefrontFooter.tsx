@@ -36,9 +36,15 @@ export const StorefrontFooter: React.FC<StorefrontFooterProps> = ({ onNavigateCa
           <div className="md:col-span-3 space-y-2">
             <p className="text-xs font-semibold text-[#111111]">Categorias</p>
             <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-[#666666]">
-              {(['Todos', 'Mulher', 'Homem', 'Vestidos', 'Malas', 'Saldos'] as const).map((cat) => (
+              {[
+                'Todos',
+                ...(cfg.categoryStripItems || [])
+                  .slice(0, 6)
+                  .map((c) => c.category)
+                  .filter(Boolean),
+              ].map((cat, idx) => (
                 <button
-                  key={cat}
+                  key={`${cat}-${idx}`}
                   type="button"
                   onClick={() => onNavigateCategory(cat)}
                   className="hover:text-[#111111] cursor-pointer"

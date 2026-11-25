@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Plus, Trash2, X } from 'lucide-react';
-import { ASSETS } from '../../data/seedData';
+import { ASSETS, DEFAULT_PRODUCT_CATEGORIES } from '../../data/seedData';
 import { useStore } from '../../context/StoreContext';
 import {
   Product,
@@ -16,16 +16,6 @@ interface ProductFormModalProps {
   onClose: () => void;
 }
 
-const CATEGORIES: ProductCategory[] = [
-  'Mulher',
-  'Homem',
-  'Vestidos',
-  'Tops',
-  'Calçado',
-  'Malas',
-  'Acessórios',
-];
-
 export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   isOpen,
   editingProduct,
@@ -33,9 +23,22 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
 }) => {
   const { addProduct, updateProduct, settings } = useStore();
 
+  const availableCategories = React.useMemo(() => {
+    const strip = settings.storefrontConfig?.categoryStripItems || [];
+    const nonSale = strip
+      .filter((c) => !c.isSale && c.category?.trim())
+      .map((c) => c.category.trim());
+    const base = nonSale.length > 0 ? nonSale : DEFAULT_PRODUCT_CATEGORIES;
+    const set = new Set(base);
+    if (editingProduct?.category?.trim()) {
+      set.add(editingProduct.category.trim());
+    }
+    return Array.from(set);
+  }, [settings.storefrontConfig?.categoryStripItems, editingProduct]);
+
   const [name, setName] = useState('');
   const [sku, setSku] = useState('');
-  const [category, setCategory] = useState<ProductCategory>('Mulher');
+  const [category, setCategory] = useState<ProductCategory>(availableCategories[0] || 'Mulher');
   const [price, setPrice] = useState('25000');
   const [originalPrice, setOriginalPrice] = useState('');
   const [stock, setStock] = useState('15');
@@ -74,7 +77,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     } else {
       setName('');
       setSku(`LUN-${Math.floor(100 + Math.random() * 900)}`);
-      setCategory('Mulher');
+      setCategory(availableCategories[0] || 'Mulher');
       setPrice('25000');
       setOriginalPrice('');
       setStock('12');
@@ -87,7 +90,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       setIsNew(true);
       setFeatured(true);
     }
-  }, [editingProduct, isOpen]);
+  }, [editingProduct, isOpen, availableCategories]);
 
   if (!isOpen) return null;
 
@@ -238,7 +241,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
               onChange={(e) => setCategory(e.target.value as ProductCategory)}
               className="w-full border border-black/15 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-[#1C1C1E]"
             >
-              {CATEGORIES.map((c) => (
+              {availableCategories.map((c) => (
                 <option key={c} value={c}>
                   {c}
                 </option>

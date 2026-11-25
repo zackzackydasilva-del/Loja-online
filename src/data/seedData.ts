@@ -9,6 +9,16 @@ import type {
   StorefrontConfig,
 } from '../types/store.ts';
 
+export const DEFAULT_PRODUCT_CATEGORIES: string[] = [
+  'Mulher',
+  'Homem',
+  'Vestidos',
+  'Tops',
+  'Calçado',
+  'Malas',
+  'Acessórios',
+];
+
 export const ASSETS = {
   heroWoman: '/src/assets/images/hero_editorial_woman_1795267588559.jpg',
   dressesEditorial: '/src/assets/images/cat_dresses_collection_1795267588727.jpg',
