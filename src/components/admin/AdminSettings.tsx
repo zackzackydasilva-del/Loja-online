@@ -1188,8 +1188,8 @@ export const AdminSettings: React.FC = () => {
             subtitle: 'Seleção exclusiva disponível agora na loja.',
             ctaText: 'Ver Destaque',
             image: '',
-            targetCategory: 'Todos',
-            productId: products[0]?.id || '',
+            targetCategory: dynamicCategoryOptions[1] || 'Todos',
+            productId: '',
           };
           updateSfDraft({ ...sf, highlights: [...highlights, nextItem].slice(0, MAX_HIGHLIGHTS) });
         };
@@ -1346,46 +1346,83 @@ export const AdminSettings: React.FC = () => {
                           />
                         </div>
 
-                        <div>
-                          <label className="block text-[11px] font-medium text-[#555552] mb-1">
-                            Produto em Destaque (opcional)
-                          </label>
-                          <select
-                            value={hl.productId || ''}
-                            onChange={(e) => updateHighlightAt(idx, { productId: e.target.value })}
-                            className="w-full bg-white border border-black/15 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#1C1C1E]"
-                          >
-                            <option value="">Abrir por categoria</option>
-                            {products.map((p) => (
-                              <option key={p.id} value={p.id}>
-                                {p.name} ({formatMoney(p.price, settings.currencySymbol)})
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        {!hl.productId && (
-                          <div className="sm:col-span-2">
-                            <label className="block text-[11px] font-medium text-[#555552] mb-1">
-                              Categoria de Destino
+                        <div className="sm:col-span-2 space-y-2.5 pt-1">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <label className="block text-[11px] font-medium text-[#555552]">
+                              Ao clicar no destaque na loja:
                             </label>
-                            <select
-                              value={hl.targetCategory}
-                              onChange={(e) =>
-                                updateHighlightAt(idx, {
-                                  targetCategory: e.target.value as ProductCategory | 'Todos',
-                                })
-                              }
-                              className="w-full bg-white border border-black/15 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#1C1C1E]"
-                            >
-                              {dynamicCategoryOptions.map((cat) => (
-                                <option key={cat} value={cat}>
-                                  {cat}
-                                </option>
-                              ))}
-                            </select>
+                            <div className="inline-flex rounded-full bg-white p-0.5 border border-black/10">
+                              <button
+                                type="button"
+                                onClick={() => updateHighlightAt(idx, { productId: '' })}
+                                className={`px-3 py-1 rounded-full text-[11px] font-medium transition-colors cursor-pointer ${
+                                  !hl.productId
+                                    ? 'bg-[#1C1C1E] text-white'
+                                    : 'text-[#555552] hover:text-[#1C1C1E]'
+                                }`}
+                              >
+                                Ir para Categoria
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateHighlightAt(idx, {
+                                    productId: hl.productId || products[0]?.id || '',
+                                  })
+                                }
+                                className={`px-3 py-1 rounded-full text-[11px] font-medium transition-colors cursor-pointer ${
+                                  hl.productId
+                                    ? 'bg-[#1C1C1E] text-white'
+                                    : 'text-[#555552] hover:text-[#1C1C1E]'
+                                }`}
+                              >
+                                Abrir Produto
+                              </button>
+                            </div>
                           </div>
-                        )}
+
+                          {!hl.productId ? (
+                            <div>
+                              <label className="block text-[11px] font-medium text-[#555552] mb-1">
+                                Categoria Conectada (vai direto para esta categoria ao clicar)
+                              </label>
+                              <select
+                                value={hl.targetCategory || 'Todos'}
+                                onChange={(e) =>
+                                  updateHighlightAt(idx, {
+                                    targetCategory: e.target.value as ProductCategory | 'Todos',
+                                    productId: '',
+                                  })
+                                }
+                                className="w-full bg-white border border-black/15 rounded-xl px-3 py-2 text-xs font-medium text-[#1C1C1E] focus:outline-none focus:border-[#1C1C1E]"
+                              >
+                                {dynamicCategoryOptions.map((cat) => (
+                                  <option key={cat} value={cat}>
+                                    {cat === 'Todos' ? 'Todos os Produtos' : cat}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          ) : (
+                            <div>
+                              <label className="block text-[11px] font-medium text-[#555552] mb-1">
+                                Produto Conectado
+                              </label>
+                              <select
+                                value={hl.productId || ''}
+                                onChange={(e) => updateHighlightAt(idx, { productId: e.target.value })}
+                                className="w-full bg-white border border-black/15 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#1C1C1E]"
+                              >
+                                <option value="">Selecionar categoria em vez de produto</option>
+                                {products.map((p) => (
+                                  <option key={p.id} value={p.id}>
+                                    {p.name} ({formatMoney(p.price, settings.currencySymbol)})
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+                        </div>
                       </div>
 
                       <ImageField

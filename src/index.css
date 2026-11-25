@@ -21,6 +21,30 @@
   }
 }
 
+@keyframes lunora-marquee {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+.lunora-marquee-track {
+  display: flex;
+  width: max-content;
+  will-change: transform;
+  animation: lunora-marquee 36s linear infinite;
+}
+
+.lunora-highlights-track {
+  display: flex;
+  align-items: flex-start;
+  width: max-content;
+  will-change: transform;
+  animation: lunora-marquee 22s linear infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;

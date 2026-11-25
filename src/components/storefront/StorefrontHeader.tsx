@@ -38,8 +38,18 @@ export const StorefrontHeader: React.FC<StorefrontHeaderProps> = ({
 
   return (
     <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-black/[0.06]">
-      <div className="bg-[#111111] text-white text-[11px] sm:text-xs font-medium py-1.5 px-4 text-center tracking-wide">
-        <p className="max-w-[1360px] mx-auto truncate">{topNotice}</p>
+      <div className="bg-[#111111] text-white text-[11px] sm:text-xs font-medium py-1.5 overflow-hidden tracking-wide select-none">
+        <div className="lunora-marquee-track">
+          {[0, 1].map((loopIdx) => (
+            <div key={loopIdx} className="flex shrink-0 items-center">
+              {[0, 1, 2, 3].map((copyIdx) => (
+                <span key={`${loopIdx}-${copyIdx}`} className="whitespace-nowrap px-6 sm:px-10">
+                  {topNotice}
+                </span>
+              ))}
+            </div>
+          ))}
+        </div>
       </div>
       <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 h-12 sm:h-16 flex items-center justify-between gap-6">
         {/* Zone 1: Brand Wordmark */}

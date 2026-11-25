@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Heart, Plus } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import { Product, ProductCategory } from '../../types/store';
@@ -29,10 +29,16 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
 
   const [sortBy, setSortBy] = useState<'featured' | 'price-asc' | 'price-desc'>('featured');
   const carouselRef = useRef<HTMLDivElement | null>(null);
-  const highlightsTrackRef = useRef<HTMLDivElement | null>(null);
-  const scrollSyncTimerRef = useRef<number | null>(null);
-  const [activeHighlight, setActiveHighlight] = useState(0);
-  const [highlightsPaused, setHighlightsPaused] = useState(false);
+  const catalogSectionRef = useRef<HTMLDivElement | null>(null);
+  const highlightsViewportRef = useRef<HTMLDivElement | null>(null);
+  const subPixelScrollRef = useRef(0);
+  const isPointerOverHighlightsRef = useRef(false);
+  const isDraggingHighlightsRef = useRef(false);
+  const didDragHighlightsRef = useRef(false);
+  const dragStartXRef = useRef(0);
+  const dragStartScrollLeftRef = useRef(0);
+  const resumeTouchTimerRef = useRef<number | null>(null);
+  const [highlightsTouchPaused, setHighlightsTouchPaused] = useState(false);
 
   const cfg = settings.storefrontConfig;
 
@@ -63,61 +69,88 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
     [cfg.highlights]
   );
 
-  const safeHighlightIdx =
-    highlightsList.length > 0 ? Math.min(activeHighlight, highlightsList.length - 1) : 0;
-
-  const scrollToHighlight = useCallback(
-    (index: number) => {
-      if (highlightsList.length === 0) return;
-      const wrapped =
-        ((index % highlightsList.length) + highlightsList.length) % highlightsList.length;
-      setActiveHighlight(wrapped);
-      const track = highlightsTrackRef.current;
-      if (track) {
-        const slideEl = track.children[wrapped] as HTMLElement | undefined;
-        if (slideEl) {
-          track.scrollTo({
-            left: slideEl.offsetLeft,
-            behavior: 'smooth',
-          });
-        }
-      }
-    },
-    [highlightsList.length]
-  );
+  const highlightsRepeatPerHalf = useMemo(() => {
+    if (highlightsList.length === 0) return 0;
+    return Math.max(1, Math.ceil(5 / highlightsList.length));
+  }, [highlightsList.length]);
 
   useEffect(() => {
-    if (highlightsList.length <= 1 || highlightsPaused) return;
-    const timer = window.setInterval(() => {
-      setActiveHighlight((prev) => {
-        const next = (prev + 1) % highlightsList.length;
-        const track = highlightsTrackRef.current;
-        if (track) {
-          const slideEl = track.children[next] as HTMLElement | undefined;
-          if (slideEl) {
-            track.scrollTo({
-              left: slideEl.offsetLeft,
-              behavior: 'smooth',
-            });
-          }
-        }
-        return next;
-      });
-    }, 2000);
-    return () => window.clearInterval(timer);
-  }, [highlightsList.length, highlightsPaused]);
-
-  const handleHighlightsScroll = () => {
-    if (scrollSyncTimerRef.current) {
-      window.clearTimeout(scrollSyncTimerRef.current);
+    if (highlightsList.length === 0) return;
+    if (typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      return;
     }
-    scrollSyncTimerRef.current = window.setTimeout(() => {
-      const track = highlightsTrackRef.current;
-      if (!track || track.clientWidth <= 0) return;
-      const approxIdx = Math.round(track.scrollLeft / track.clientWidth);
-      const clamped = Math.max(0, Math.min(highlightsList.length - 1, approxIdx));
-      setActiveHighlight(clamped);
-    }, 90);
+
+    let rafId = 0;
+    let lastTime = performance.now();
+    const speedPxPerSec = 105;
+
+    const tick = (now: number) => {
+      const dt = Math.min(0.05, Math.max(0, (now - lastTime) / 1000));
+      lastTime = now;
+
+      const el = highlightsViewportRef.current;
+      if (
+        el &&
+        !highlightsTouchPaused &&
+        !isPointerOverHighlightsRef.current &&
+        !isDraggingHighlightsRef.current
+      ) {
+        const halfWidth = el.scrollWidth / 2;
+        if (halfWidth > 0) {
+          if (Math.abs(el.scrollLeft - subPixelScrollRef.current) > 2) {
+            subPixelScrollRef.current = el.scrollLeft;
+          }
+          subPixelScrollRef.current += speedPxPerSec * dt;
+          if (subPixelScrollRef.current >= halfWidth) {
+            subPixelScrollRef.current -= halfWidth;
+          }
+          el.scrollLeft = subPixelScrollRef.current;
+        }
+      } else if (el) {
+        subPixelScrollRef.current = el.scrollLeft;
+      }
+
+      rafId = window.requestAnimationFrame(tick);
+    };
+
+    rafId = window.requestAnimationFrame(tick);
+    return () => {
+      window.cancelAnimationFrame(rafId);
+    };
+  }, [highlightsList.length, highlightsTouchPaused]);
+
+  const handleHighlightsScrollWrap = () => {
+    const el = highlightsViewportRef.current;
+    if (!el) return;
+    const halfWidth = el.scrollWidth / 2;
+    if (halfWidth <= 0) return;
+    if (el.scrollLeft >= halfWidth) {
+      el.scrollLeft -= halfWidth;
+      subPixelScrollRef.current = el.scrollLeft;
+    }
+  };
+
+  const pauseHighlightsTemporarily = (ms = 2200) => {
+    if (resumeTouchTimerRef.current) {
+      window.clearTimeout(resumeTouchTimerRef.current);
+    }
+    setHighlightsTouchPaused(true);
+    resumeTouchTimerRef.current = window.setTimeout(() => {
+      setHighlightsTouchPaused(false);
+    }, ms);
+  };
+
+  const nudgeHighlights = (direction: -1 | 1) => {
+    const el = highlightsViewportRef.current;
+    if (!el) return;
+    pauseHighlightsTemporarily(2400);
+    const halfWidth = el.scrollWidth / 2;
+    const step = el.clientWidth < 640 ? 256 : 320;
+    if (direction < 0 && el.scrollLeft < step && halfWidth > step) {
+      el.scrollLeft += halfWidth;
+      subPixelScrollRef.current = el.scrollLeft;
+    }
+    el.scrollBy({ left: direction * step, behavior: 'smooth' });
   };
 
   const favoriteCarouselProducts = useMemo(() => {
@@ -328,128 +361,174 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
         ) : null}
       </div>
 
-      {/* CUSTOM VITRINE HIGHLIGHTS CAROUSEL (DESTAQUES — POR BAIXO DE "As Nossas Escolhas Favoritas") */}
+      {/* CUSTOM VITRINE HIGHLIGHTS MARQUEE INTERATIVO (ROLA SEM PARAR, COM CONTROLO DE PARAR E ROLAR MANUALMENTE) */}
       {highlightsList.length > 0 && (
-        <div
-          className="space-y-3"
-          onMouseEnter={() => setHighlightsPaused(true)}
-          onMouseLeave={() => setHighlightsPaused(false)}
-          onTouchStart={() => setHighlightsPaused(true)}
-          onTouchEnd={() => {
-            window.setTimeout(() => setHighlightsPaused(false), 1800);
-          }}
-        >
+        <div className="space-y-3">
           <div className="flex items-center justify-between gap-3">
             <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#777777]">
               Destaques
             </span>
-            {highlightsList.length > 1 && (
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => scrollToHighlight(safeHighlightIdx - 1)}
-                  aria-label="Destaque anterior"
-                  className="w-8 h-8 rounded-full bg-[#EFEFEF] hover:bg-[#111111] hover:text-white text-[#111111] flex items-center justify-center transition-colors cursor-pointer"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => scrollToHighlight(safeHighlightIdx + 1)}
-                  aria-label="Próximo destaque"
-                  className="w-8 h-8 rounded-full bg-[#EFEFEF] hover:bg-[#111111] hover:text-white text-[#111111] flex items-center justify-center transition-colors cursor-pointer"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
-            )}
+
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => nudgeHighlights(-1)}
+                aria-label="Rolar destaques para a esquerda"
+                className="w-8 h-8 rounded-full bg-[#EFEFEF] hover:bg-[#111111] hover:text-white text-[#111111] flex items-center justify-center transition-colors cursor-pointer"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => nudgeHighlights(1)}
+                aria-label="Rolar destaques para a direita"
+                className="w-8 h-8 rounded-full bg-[#EFEFEF] hover:bg-[#111111] hover:text-white text-[#111111] flex items-center justify-center transition-colors cursor-pointer"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
           </div>
 
           <div
-            ref={highlightsTrackRef}
-            onScroll={handleHighlightsScroll}
-            className="flex items-stretch overflow-x-auto snap-x snap-mandatory scroll-smooth rounded-[22px] sm:rounded-[28px] [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            ref={highlightsViewportRef}
+            onScroll={handleHighlightsScrollWrap}
+            onWheel={() => pauseHighlightsTemporarily(2000)}
+            onDragStart={(e) => e.preventDefault()}
+            onMouseEnter={() => {
+              isPointerOverHighlightsRef.current = true;
+            }}
+            onMouseLeave={() => {
+              isPointerOverHighlightsRef.current = false;
+              isDraggingHighlightsRef.current = false;
+            }}
+            onMouseDown={(e) => {
+              const el = highlightsViewportRef.current;
+              if (!el) return;
+              isDraggingHighlightsRef.current = true;
+              didDragHighlightsRef.current = false;
+              dragStartXRef.current = e.clientX;
+              dragStartScrollLeftRef.current = el.scrollLeft;
+            }}
+            onMouseMove={(e) => {
+              const el = highlightsViewportRef.current;
+              if (!el || !isDraggingHighlightsRef.current) return;
+              const deltaX = e.clientX - dragStartXRef.current;
+              if (Math.abs(deltaX) > 6) {
+                didDragHighlightsRef.current = true;
+              }
+              const halfWidth = el.scrollWidth / 2;
+              let nextScroll = dragStartScrollLeftRef.current - deltaX;
+              if (halfWidth > 0) {
+                if (nextScroll < 0) {
+                  nextScroll += halfWidth;
+                  dragStartScrollLeftRef.current += halfWidth;
+                } else if (nextScroll >= halfWidth) {
+                  nextScroll -= halfWidth;
+                  dragStartScrollLeftRef.current -= halfWidth;
+                }
+              }
+              el.scrollLeft = nextScroll;
+              subPixelScrollRef.current = el.scrollLeft;
+            }}
+            onMouseUp={() => {
+              isDraggingHighlightsRef.current = false;
+              window.setTimeout(() => {
+                didDragHighlightsRef.current = false;
+              }, 0);
+            }}
+            onTouchStart={() => {
+              if (resumeTouchTimerRef.current) {
+                window.clearTimeout(resumeTouchTimerRef.current);
+              }
+              setHighlightsTouchPaused(true);
+            }}
+            onTouchEnd={() => {
+              pauseHighlightsTemporarily(2000);
+            }}
+            className="flex items-start overflow-x-auto pb-1 select-none cursor-grab active:cursor-grabbing [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           >
-            {highlightsList.map((hl) => {
-              const linkedProduct = hl.productId
-                ? products.find((p) => p.id === hl.productId)
-                : undefined;
-              const hasImg = Boolean(hl.image && hl.image.trim());
+            {[0, 1].map((halfIdx) => (
+              <div
+                key={halfIdx}
+                aria-hidden={halfIdx === 1}
+                className="flex items-start gap-4 sm:gap-5 pr-4 sm:pr-5 shrink-0"
+              >
+                {Array.from({ length: highlightsRepeatPerHalf }).flatMap((_, repIdx) =>
+                  highlightsList.map((hl) => {
+                    const linkedProduct = hl.productId
+                      ? products.find((p) => p.id === hl.productId)
+                      : undefined;
+                    const hasImg = Boolean(hl.image && hl.image.trim());
 
-              return (
-                <article
-                  key={hl.id}
-                  onClick={() => {
-                    if (linkedProduct) {
-                      setQuickViewProduct(linkedProduct);
-                    } else {
-                      if (wishlistOnly) onResetView();
-                      setSelectedCategory(hl.targetCategory || 'Todos');
-                    }
-                  }}
-                  className="group relative w-full shrink-0 snap-center overflow-hidden bg-[#09090B] text-white cursor-pointer flex items-center justify-center min-h-[260px] sm:min-h-[360px] lg:min-h-[420px]"
-                >
-                  {hasImg ? (
-                    <SafeImage
-                      src={hl.image}
-                      alt={hl.title}
-                      className="w-full h-auto max-h-[540px] lg:max-h-[600px] object-contain mx-auto block"
-                    />
-                  ) : null}
+                    return (
+                      <article
+                        key={`${halfIdx}-${repIdx}-${hl.id}`}
+                        onClick={() => {
+                          if (didDragHighlightsRef.current) return;
+                          if (linkedProduct) {
+                            setQuickViewProduct(linkedProduct);
+                          } else {
+                            if (wishlistOnly) onResetView();
+                            if (searchQuery) setSearchQuery('');
+                            setSelectedCategory(hl.targetCategory || 'Todos');
+                            window.setTimeout(() => {
+                              catalogSectionRef.current?.scrollIntoView({
+                                behavior: 'smooth',
+                                block: 'start',
+                              });
+                            }, 60);
+                          }
+                        }}
+                        className={`group relative w-[240px] sm:w-[290px] lg:w-[320px] shrink-0 rounded-[18px] sm:rounded-[22px] overflow-hidden bg-[#09090B] text-white cursor-pointer pb-10 sm:pb-11 transition-transform duration-200 hover:-translate-y-0.5 ${
+                          hasImg ? '' : 'min-h-[210px] sm:min-h-[240px]'
+                        }`}
+                      >
+                        {hasImg ? (
+                          <SafeImage
+                            src={hl.image}
+                            alt={hl.title}
+                            draggable={false}
+                            className="w-full h-auto block pointer-events-none"
+                          />
+                        ) : null}
 
-                  {/* Efeito escuro exclusivamente na borda inferior onde ficam descrições e detalhes */}
-                  <div className="absolute inset-x-0 bottom-0 pt-24 sm:pt-32 pb-5 sm:pb-7 px-5 sm:px-8 lg:px-10 bg-gradient-to-t from-[#09090B] via-[#09090B]/90 to-transparent flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-                    <div className="space-y-1.5 max-w-2xl">
-                      {hl.badge && (
-                        <span className="inline-block px-2.5 py-0.5 rounded-full bg-white/15 backdrop-blur-xs text-white text-[10px] font-semibold tracking-wide uppercase">
-                          {hl.badge}
-                        </span>
-                      )}
-                      <h3 className="text-lg sm:text-2xl lg:text-[28px] font-semibold leading-tight text-white">
-                        {hl.title}
-                      </h3>
-                      {hl.subtitle && (
-                        <p className="text-xs sm:text-sm text-white/85 leading-relaxed line-clamp-2">
-                          {hl.subtitle}
-                        </p>
-                      )}
-                    </div>
+                        {/* Sobreposição do título do destaque + descrição e ação na borda inferior escura */}
+                        <div className="absolute inset-x-0 bottom-0 pt-5 sm:pt-6 pb-2.5 sm:pb-3 px-3 sm:px-4 bg-gradient-to-t from-[#09090B] via-[#09090B]/70 to-transparent flex items-end justify-between gap-2">
+                          <div className="space-y-0.5 min-w-0 flex-1">
+                            {hl.badge && (
+                              <span className="inline-block px-2 py-0.5 rounded-full bg-white/15 backdrop-blur-xs text-white text-[8px] sm:text-[9px] font-semibold tracking-wide uppercase">
+                                {hl.badge}
+                              </span>
+                            )}
+                            <h3 className="text-xs sm:text-sm font-semibold leading-tight text-white line-clamp-1">
+                              {hl.title}
+                            </h3>
+                            {hl.subtitle && (
+                              <p className="text-[10px] sm:text-[11px] text-white/80 leading-snug line-clamp-1">
+                                {hl.subtitle}
+                              </p>
+                            )}
+                          </div>
 
-                    <div className="shrink-0 self-start sm:self-end">
-                      <span className="inline-flex items-center gap-1.5 px-4 sm:px-5 py-2 sm:py-2.5 rounded-full bg-white text-[#111111] text-xs font-semibold shadow-sm group-hover:bg-neutral-100 transition-colors">
-                        <span>{hl.ctaText || 'Ver Destaque'}</span>
-                        <ChevronRight className="w-3.5 h-3.5" />
-                      </span>
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
+                          <div className="shrink-0">
+                            <span className="inline-flex items-center gap-0.5 px-2.5 py-1 sm:py-1.5 rounded-full bg-white text-[#111111] text-[10px] font-semibold shadow-sm group-hover:bg-neutral-100 transition-colors whitespace-nowrap">
+                              <span>{hl.ctaText || 'Ver'}</span>
+                              <ChevronRight className="w-3 h-3" />
+                            </span>
+                          </div>
+                        </div>
+                      </article>
+                    );
+                  })
+                )}
+              </div>
+            ))}
           </div>
-
-          {highlightsList.length > 1 && (
-            <div className="flex items-center justify-center gap-1.5 pt-1">
-              {highlightsList.map((hl, idx) => {
-                const active = safeHighlightIdx === idx;
-                return (
-                  <button
-                    key={hl.id}
-                    type="button"
-                    onClick={() => scrollToHighlight(idx)}
-                    aria-label={`Ver destaque ${idx + 1}`}
-                    className={`h-1 rounded-full transition-all cursor-pointer ${
-                      active ? 'w-5 bg-[#111111]' : 'w-1.5 bg-black/20 hover:bg-black/40'
-                    }`}
-                  />
-                );
-              })}
-            </div>
-          )}
         </div>
       )}
 
       {/* FILTERABLE CATALOG GRID SECTION */}
-      <div className="space-y-4">
+      <div ref={catalogSectionRef} className="space-y-4 scroll-mt-24">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 overflow-x-auto pb-1">
             {filterTabs.map((cat) => {
