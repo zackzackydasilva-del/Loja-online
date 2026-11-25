@@ -106,47 +106,47 @@ export const StorefrontPopupModal: React.FC = () => {
       aria-label={popup.title || 'Notificação da Loja'}
     >
       <div
-        className="relative w-full max-w-md bg-white rounded-[26px] overflow-hidden shadow-2xl border border-black/10"
+        className="relative w-full max-w-[340px] sm:max-w-[360px] max-h-[88vh] overflow-y-auto bg-white rounded-[22px] shadow-2xl border border-black/10"
         onClick={(e) => e.stopPropagation()}
       >
         <button
           type="button"
           onClick={closePopup}
           aria-label="Fechar popup"
-          className="absolute top-3.5 right-3.5 z-10 w-8 h-8 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center backdrop-blur-xs transition-colors cursor-pointer"
+          className="absolute top-2.5 right-2.5 z-10 w-7 h-7 rounded-full bg-black/65 hover:bg-black/85 text-white flex items-center justify-center backdrop-blur-xs transition-colors cursor-pointer"
         >
-          <X className="w-4 h-4" />
+          <X className="w-3.5 h-3.5" />
         </button>
 
         {hasBannerImage ? (
-          <div className="w-full bg-[#111111] overflow-hidden">
+          <div className="w-full bg-[#F5F4F0] flex items-center justify-center overflow-hidden">
             <SafeImage
               src={popup.image}
               alt={popup.title || 'Destaque'}
-              className="w-full max-h-[300px] object-cover object-center block"
+              className="w-full h-auto max-h-[200px] object-contain object-center block"
             />
           </div>
         ) : (
-          <div className="w-full bg-[#111111] px-6 pt-7 pb-5 text-white flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-white/80" />
-            <span className="text-[11px] uppercase tracking-[0.16em] font-semibold text-white/85">
+          <div className="w-full bg-[#111111] px-5 pt-5 pb-4 text-white flex items-center gap-2">
+            <Sparkles className="w-3.5 h-3.5 text-white/80" />
+            <span className="text-[10px] uppercase tracking-[0.16em] font-semibold text-white/85">
               {popup.badge || settings.storeName}
             </span>
           </div>
         )}
 
-        <div className="p-6 space-y-4">
-          <div className="space-y-1.5">
+        <div className="p-4 sm:p-5 space-y-3">
+          <div className="space-y-1">
             {hasBannerImage && popup.badge && (
-              <span className="inline-block px-2.5 py-0.5 rounded-full bg-[#111111] text-white text-[10px] font-semibold uppercase tracking-wider">
+              <span className="inline-block px-2 py-0.5 rounded-full bg-[#111111] text-white text-[9px] font-semibold uppercase tracking-wider">
                 {popup.badge}
               </span>
             )}
-            <h3 className="font-serif text-2xl font-medium text-[#111111] leading-snug">
+            <h3 className="font-serif text-lg sm:text-xl font-medium text-[#111111] leading-snug">
               {popup.title || 'Novidade na Loja'}
             </h3>
             {popup.subtitle && (
-              <p className="text-xs sm:text-sm text-[#555552] leading-relaxed">
+              <p className="text-xs text-[#555552] leading-relaxed">
                 {popup.subtitle}
               </p>
             )}
@@ -155,9 +155,9 @@ export const StorefrontPopupModal: React.FC = () => {
           {linkedProduct && (
             <div
               onClick={handleInAppNavigate}
-              className="flex items-center gap-3 p-2.5 rounded-2xl bg-[#F5F4F0] border border-black/6 cursor-pointer hover:bg-[#ECEAE3] transition-colors"
+              className="flex items-center gap-2.5 p-2 rounded-xl bg-[#F5F4F0] border border-black/6 cursor-pointer hover:bg-[#ECEAE3] transition-colors"
             >
-              <div className="w-12 h-14 rounded-xl overflow-hidden bg-white shrink-0">
+              <div className="w-10 h-12 rounded-lg overflow-hidden bg-white shrink-0">
                 <SafeImage
                   src={linkedProduct.image}
                   alt={linkedProduct.name}
@@ -165,18 +165,18 @@ export const StorefrontPopupModal: React.FC = () => {
                 />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-[11px] text-[#72726E]">{linkedProduct.category}</p>
+                <p className="text-[10px] text-[#72726E]">{linkedProduct.category}</p>
                 <p className="text-xs font-semibold text-[#111111] truncate">
                   {linkedProduct.name}
                 </p>
-                <p className="text-xs font-mono font-semibold text-[#111111] tabular-nums">
+                <p className="text-[11px] font-mono font-semibold text-[#111111] tabular-nums">
                   {formatMoney(linkedProduct.price, settings.currencySymbol)}
                 </p>
               </div>
             </div>
           )}
 
-          <div className="flex flex-col sm:flex-row gap-2 pt-1">
+          <div className="flex flex-col sm:flex-row gap-2 pt-0.5">
             {!linkedProduct && !targetCategory && trimmedUrl ? (
               <a
                 href={trimmedUrl}
@@ -186,26 +186,26 @@ export const StorefrontPopupModal: React.FC = () => {
                   closePopup();
                   setIsCartOpen(false);
                 }}
-                className="flex-1 py-3 px-5 rounded-full bg-[#111111] text-white text-xs sm:text-sm font-medium inline-flex items-center justify-center gap-2 hover:bg-[#2B2B2B] transition-colors"
+                className="flex-1 py-2.5 px-4 rounded-full bg-[#111111] text-white text-xs font-medium inline-flex items-center justify-center gap-1.5 hover:bg-[#2B2B2B] transition-colors"
               >
                 <span>{ctaLabel}</span>
-                <ArrowRight className="w-4 h-4" />
+                <ArrowRight className="w-3.5 h-3.5" />
               </a>
             ) : (
               <button
                 type="button"
                 onClick={handleInAppNavigate}
-                className="flex-1 py-3 px-5 rounded-full bg-[#111111] text-white text-xs sm:text-sm font-medium inline-flex items-center justify-center gap-2 hover:bg-[#2B2B2B] transition-colors cursor-pointer"
+                className="flex-1 py-2.5 px-4 rounded-full bg-[#111111] text-white text-xs font-medium inline-flex items-center justify-center gap-1.5 hover:bg-[#2B2B2B] transition-colors cursor-pointer"
               >
                 <span>{ctaLabel}</span>
-                <ArrowRight className="w-4 h-4" />
+                <ArrowRight className="w-3.5 h-3.5" />
               </button>
             )}
 
             <button
               type="button"
               onClick={closePopup}
-              className="py-3 px-4 rounded-full bg-[#EFEFEF] text-[#333333] text-xs font-medium hover:bg-[#E2E2E2] transition-colors cursor-pointer"
+              className="py-2.5 px-4 rounded-full bg-[#EFEFEF] text-[#333333] text-xs font-medium hover:bg-[#E2E2E2] transition-colors cursor-pointer"
             >
               Fechar
             </button>
