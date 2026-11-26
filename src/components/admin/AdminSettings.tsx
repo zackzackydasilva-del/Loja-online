@@ -17,6 +17,7 @@ import {
   Star,
   Tag,
   Trash2,
+  Webhook,
 } from 'lucide-react';
 import { DEFAULT_STOREFRONT_CONFIG } from '../../data/seedData';
 import { useStore } from '../../context/StoreContext';
@@ -26,6 +27,7 @@ import {
   HighlightCardConfig,
   OrderNotificationRecord,
   ProductCategory,
+  SaleWebhookDeliveryRecord,
   StorePopupConfig,
   StorefrontConfig,
 } from '../../types/store';
@@ -92,6 +94,10 @@ function mergeStorefrontConfig(cfg?: Partial<StorefrontConfig>): StorefrontConfi
       ...DEFAULT_STOREFRONT_CONFIG.orderNotification!,
       ...(cfg?.orderNotification || {}),
     },
+    saleWebhook: {
+      ...DEFAULT_STOREFRONT_CONFIG.saleWebhook!,
+      ...(cfg?.saleWebhook || {}),
+    },
     guarantees:
       cfg?.guarantees && cfg.guarantees.length > 0
         ? cfg.guarantees
@@ -143,6 +149,8 @@ export const AdminSettings: React.FC = () => {
   const [copiedCategoryKey, setCopiedCategoryKey] = useState<string | null>(null);
   const [copiedPopupLinkKey, setCopiedPopupLinkKey] = useState<'entry' | 'postCheckout' | null>(null);
   const [orderNotifications, setOrderNotifications] = useState<OrderNotificationRecord[]>([]);
+  const [webhookDeliveries, setWebhookDeliveries] = useState<SaleWebhookDeliveryRecord[]>([]);
+  const [webhookEnvConfigured, setWebhookEnvConfigured] = useState(false);
   const [emailTransportInfo, setEmailTransportInfo] = useState<{
     configured: boolean;
     provider: 'resend' | 'smtp' | 'none';
@@ -153,6 +161,12 @@ export const AdminSettings: React.FC = () => {
     type: 'ok' | 'warn';
     msg: string;
   } | null>(null);
+  const [testingWebhook, setTestingWebhook] = useState(false);
+  const [testWebhookFeedback, setTestWebhookFeedback] = useState<{
+    type: 'ok' | 'warn';
+    msg: string;
+  } | null>(null);
+  const [showWebhookGuide, setShowWebhookGuide] = useState(false);
 
   const [newChannelName, setNewChannelName] = useState('');
   const [newChannelRole, setNewChannelRole] = useState('');
@@ -189,11 +203,17 @@ export const AdminSettings: React.FC = () => {
         (
           data: {
             notifications?: OrderNotificationRecord[];
+            webhooks?: SaleWebhookDeliveryRecord[];
+            webhookEnvConfigured?: boolean;
             transport?: { configured: boolean; provider: 'resend' | 'smtp' | 'none'; defaultRecipient: string };
           } | null
         ) => {
           if (!active || !data) return;
           if (Array.isArray(data.notifications)) setOrderNotifications(data.notifications);
+          if (Array.isArray(data.webhooks)) setWebhookDeliveries(data.webhooks);
+          if (typeof data.webhookEnvConfigured === 'boolean') {
+            setWebhookEnvConfigured(data.webhookEnvConfigured);
+          }
           if (data.transport) setEmailTransportInfo(data.transport);
         }
       )
@@ -2296,6 +2316,281 @@ export const AdminSettings: React.FC = () => {
                                 {item.description}
                               </p>
                             ))}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
+          </section>
+
+          {/* APPROVED SALE WEBHOOK NOTIFICATIONS CARD */}
+          <section className="bg-white rounded-[24px] p-6 border border-black/5 space-y-4">
+            {(() => {
+              const webhookCfg = sf.saleWebhook || {
+                enabled: false,
+                url: '',
+                secret: '',
+                hasSecret: false,
+              };
+              const updateWebhook = (patch: Partial<typeof webhookCfg>) => {
+                updateSfDraft({
+                  ...sf,
+                  saleWebhook: {
+                    ...webhookCfg,
+                    ...patch,
+                  },
+                });
+              };
+
+              const handleSendTestWebhook = async () => {
+                if (!adminToken) return;
+                setTestingWebhook(true);
+                setTestWebhookFeedback(null);
+                try {
+                  const res = await fetch('/api/admin/webhooks/test', {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      Authorization: `Bearer ${adminToken}`,
+                    },
+                    body: JSON.stringify({
+                      url: webhookCfg.url,
+                      secret: webhookCfg.secret,
+                    }),
+                  });
+                  const data = (await res.json()) as {
+                    delivery?: SaleWebhookDeliveryRecord;
+                    error?: string;
+                  };
+                  if (data.delivery) {
+                    const deliv = data.delivery;
+                    setWebhookDeliveries((prev) => [
+                      deliv,
+                      ...prev.filter((w) => w.id !== deliv.id),
+                    ]);
+                    if (deliv.status === 'sent') {
+                      setTestWebhookFeedback({
+                        type: 'ok',
+                        msg: `Webhook de teste "${deliv.title}" entregue com sucesso (HTTP ${deliv.httpStatus || 200}) para ${deliv.targetHost}.`,
+                      });
+                    } else {
+                      setTestWebhookFeedback({
+                        type: 'warn',
+                        msg:
+                          deliv.errorMessage ||
+                          'Não foi possível entregar o webhook. Verifique o URL de destino.',
+                      });
+                    }
+                  } else if (!res.ok) {
+                    setTestWebhookFeedback({
+                      type: 'warn',
+                      msg: data.error || 'Não foi possível enviar o webhook de teste.',
+                    });
+                  }
+                } catch {
+                  setTestWebhookFeedback({
+                    type: 'warn',
+                    msg: 'Erro de ligação ao testar o webhook.',
+                  });
+                } finally {
+                  setTestingWebhook(false);
+                }
+              };
+
+              return (
+                <>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-2xl bg-[#1C1C1E] text-white flex items-center justify-center shrink-0">
+                        <Webhook className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-semibold text-[#1C1C1E]">
+                          Notificação de Venda por Webhook (Após Aprovação do Pedido)
+                        </h4>
+                        <p className="text-[11px] text-[#72726E] mt-0.5 leading-relaxed">
+                          Sempre que aprovar um pedido na aba Encomendas (estado <strong>Aprovado / Entregue</strong>), é enviado um pedido <code className="font-mono bg-[#F5F4F0] px-1 rounded">POST JSON</code> em tempo real para o seu Webhook (Make, n8n, Zapier, Discord, Slack ou API própria).
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => updateWebhook({ enabled: !webhookCfg.enabled })}
+                      className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-colors cursor-pointer shrink-0 ${
+                        webhookCfg.enabled
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-[#F5F4F0] text-[#555552] hover:text-[#1C1C1E]'
+                      }`}
+                    >
+                      {webhookCfg.enabled ? 'Ligado' : 'Desligado'}
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                    <div className="md:col-span-6">
+                      <label className="block text-xs font-medium text-[#555552] mb-1">
+                        URL do Webhook (Endpoint HTTPS)
+                      </label>
+                      <input
+                        type="url"
+                        value={webhookCfg.url}
+                        onChange={(e) => updateWebhook({ url: e.target.value })}
+                        placeholder="https://hook.eu2.make.com/... ou https://discord.com/api/webhooks/..."
+                        className="w-full border border-black/15 rounded-xl px-3.5 py-2.5 text-sm font-mono focus:outline-none focus:border-[#1C1C1E]"
+                      />
+                    </div>
+
+                    <div className="md:col-span-3">
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-xs font-medium text-[#555552]">
+                          Segredo HMAC (opcional)
+                        </label>
+                        {webhookCfg.hasSecret && !webhookCfg.clearSecret && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateWebhook({ secret: '', clearSecret: true, hasSecret: false })
+                            }
+                            className="text-[10px] text-red-700 hover:underline cursor-pointer"
+                          >
+                            Remover
+                          </button>
+                        )}
+                      </div>
+                      <input
+                        type="password"
+                        value={webhookCfg.secret || ''}
+                        onChange={(e) =>
+                          updateWebhook({
+                            secret: e.target.value,
+                            clearSecret: false,
+                          })
+                        }
+                        placeholder={
+                          webhookCfg.hasSecret && !webhookCfg.clearSecret
+                            ? 'Segredo guardado (escreva para alterar)'
+                            : 'Opcional: X-Lunora-Signature'
+                        }
+                        className="w-full border border-black/15 rounded-xl px-3.5 py-2.5 text-xs font-mono focus:outline-none focus:border-[#1C1C1E]"
+                      />
+                    </div>
+
+                    <div className="md:col-span-3">
+                      <button
+                        type="button"
+                        disabled={testingWebhook}
+                        onClick={handleSendTestWebhook}
+                        className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#1C1C1E] text-white text-xs font-medium hover:bg-[#323235] disabled:opacity-60 cursor-pointer"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        <span>{testingWebhook ? 'A enviar...' : 'Testar Webhook'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {webhookEnvConfigured && !webhookCfg.url.trim() && (
+                    <p className="text-[11px] text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl px-3.5 py-2">
+                      A variável de servidor <span className="font-mono font-semibold">ORDER_WEBHOOK_URL</span> está configurada e será usada automaticamente quando o URL acima estiver vazio.
+                    </p>
+                  )}
+
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowWebhookGuide((v) => !v)}
+                      className="text-xs font-medium text-[#1C1C1E] underline hover:opacity-80 cursor-pointer"
+                    >
+                      {showWebhookGuide
+                        ? 'Ocultar guia de integração & exemplo JSON'
+                        : 'Ver como ligar (Make, n8n, Zapier, Discord) & exemplo JSON'}
+                    </button>
+                    <span className="text-[11px] text-[#72726E]">
+                      Lembre-se de clicar em &ldquo;Guardar Popups &amp; Notificações&rdquo; após alterar o URL.
+                    </span>
+                  </div>
+
+                  {showWebhookGuide && (
+                    <div className="rounded-2xl bg-[#F5F4F0] border border-black/8 p-4 space-y-2.5 text-xs text-[#333330]">
+                      <p className="font-semibold text-[#1C1C1E]">
+                        Como ativar passo a passo:
+                      </p>
+                      <ol className="list-decimal list-inside space-y-1 text-[11px] leading-relaxed">
+                        <li>
+                          Crie um Webhook no <strong>Make</strong>, <strong>n8n</strong>, <strong>Zapier</strong>, <strong>Discord</strong> (Definições do Canal → Integrações → Webhooks) ou na sua API.
+                        </li>
+                        <li>
+                          Cole o URL <code className="font-mono bg-white px-1 rounded">https://...</code> acima, ligue o botão para <strong>Ligado</strong> e clique em <strong>Guardar Popups &amp; Notificações</strong>.
+                        </li>
+                        <li>
+                          Use <strong>Testar Webhook</strong> para validar a ligação imediatamente. Depois disso, sempre que clicar em <strong>Aprovar (Entregue)</strong> numa encomenda, o webhook é disparado em tempo real.
+                        </li>
+                      </ol>
+                      <pre className="bg-[#1C1C1E] text-white/90 rounded-xl p-3 text-[11px] font-mono overflow-x-auto leading-relaxed">
+{`{
+  "event": "sale.approved",
+  "title": "Venda aprovada: Pedido de Vestido Lunora, 2",
+  "store": { "name": "${storeName || 'Lunora Fashion'}", "currency": "${currencySymbol || 'Kz'}" },
+  "order": {
+    "id": "LUN-2049",
+    "status": "Entregue",
+    "total": 64000,
+    "paymentMethod": "Multicaixa Express",
+    "customer": { "name": "Nome do Cliente", "phone": "+244 ...", "city": "Luanda" },
+    "items": [{ "name": "Vestido Lunora", "quantity": 2, "unitPrice": 32000, "description": "..." }]
+  }
+}`}
+                      </pre>
+                    </div>
+                  )}
+
+                  {testWebhookFeedback && (
+                    <div
+                      className={`rounded-xl px-3.5 py-2.5 text-xs ${
+                        testWebhookFeedback.type === 'ok'
+                          ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                          : 'bg-amber-50 text-amber-900 border border-amber-200'
+                      }`}
+                    >
+                      {testWebhookFeedback.msg}
+                    </div>
+                  )}
+
+                  {webhookDeliveries.length > 0 && (
+                    <div className="pt-2 border-t border-black/6 space-y-2">
+                      <p className="text-xs font-semibold text-[#1C1C1E]">
+                        Últimos Envios de Webhook
+                      </p>
+                      <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                        {webhookDeliveries.slice(0, 8).map((wh) => (
+                          <div
+                            key={wh.id}
+                            className="p-3 rounded-xl bg-[#F5F4F0] border border-black/5 space-y-1"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="text-xs font-semibold text-[#1C1C1E]">
+                                {wh.title}
+                              </span>
+                              <span
+                                className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                                  wh.status === 'sent'
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-amber-100 text-amber-800'
+                                }`}
+                              >
+                                {wh.status === 'sent'
+                                  ? `HTTP ${wh.httpStatus || 200} → ${wh.targetHost}`
+                                  : wh.errorMessage || `Falha (${wh.targetHost})`}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-[#555552]">
+                              Encomenda #{wh.orderId} · {wh.customerName} ·{' '}
+                              {formatMoney(wh.total, wh.currencySymbol)}
+                              {wh.isTest ? ' · Teste' : ''}
+                            </p>
                           </div>
                         ))}
                       </div>

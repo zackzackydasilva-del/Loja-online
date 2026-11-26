@@ -269,13 +269,14 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
                                   <button
                                     type="button"
                                     onClick={() => updateOrderStatus(order.id, 'Entregue')}
+                                    title="Aprovar venda e marcar como Entregue (dispara Webhook se ativo)"
                                     className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors cursor-pointer ${
                                       isPaid
                                         ? 'bg-emerald-700 text-white'
                                         : 'text-[#555552] hover:text-[#1C1C1E]'
                                     }`}
                                   >
-                                    Entregue
+                                    {isPaid ? 'Aprovado' : 'Aprovar'}
                                   </button>
                                 </div>
 
@@ -395,7 +396,9 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
                         : 'bg-[#28282B] text-white/80 hover:bg-[#323236]'
                     }`}
                   >
-                    Entregue (Pago)
+                    {selectedOrder.status === 'Entregue'
+                      ? 'Aprovado · Entregue'
+                      : 'Aprovar (Entregue)'}
                   </button>
                 </div>
 

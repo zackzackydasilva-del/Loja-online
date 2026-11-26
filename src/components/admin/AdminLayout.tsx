@@ -18,11 +18,12 @@ import {
   Store,
   Truck,
   Users,
+  Webhook,
   X,
 } from 'lucide-react';
 import { ASSETS } from '../../data/seedData';
 import { useStore } from '../../context/StoreContext';
-import { OrderNotificationRecord } from '../../types/store';
+import { OrderNotificationRecord, SaleWebhookDeliveryRecord } from '../../types/store';
 import { formatMoney } from '../../utils/currency';
 import { SafeImage } from '../SafeImage';
 
@@ -67,8 +68,10 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
   const [searchOpen, setSearchOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [orderNotifications, setOrderNotifications] = useState<OrderNotificationRecord[]>([]);
+  const [webhookDeliveries, setWebhookDeliveries] = useState<SaleWebhookDeliveryRecord[]>([]);
   const [liveToastNotification, setLiveToastNotification] =
     useState<OrderNotificationRecord | null>(null);
+  const [liveToastWebhook, setLiveToastWebhook] = useState<SaleWebhookDeliveryRecord | null>(null);
   const [channelModalOpen, setChannelModalOpen] = useState(false);
   const [newChannelName, setNewChannelName] = useState('');
   const [newChannelRole, setNewChannelRole] = useState('');
@@ -81,10 +84,18 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
       headers: { Authorization: `Bearer ${adminToken}` },
     })
       .then((res) => (res.ok ? res.json() : null))
-      .then((data: { notifications?: OrderNotificationRecord[] } | null) => {
-        if (!active || !data?.notifications) return;
-        setOrderNotifications(data.notifications);
-      })
+      .then(
+        (
+          data: {
+            notifications?: OrderNotificationRecord[];
+            webhooks?: SaleWebhookDeliveryRecord[];
+          } | null
+        ) => {
+          if (!active || !data) return;
+          if (data.notifications) setOrderNotifications(data.notifications);
+          if (data.webhooks) setWebhookDeliveries(data.webhooks);
+        }
+      )
       .catch(() => {
         // Ignore non-fatal fetch error
       });
@@ -97,15 +108,22 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
       try {
         const parsed = JSON.parse(event.data) as {
           type?: string;
-          payload?: OrderNotificationRecord;
+          payload?: OrderNotificationRecord | SaleWebhookDeliveryRecord;
         };
         if (parsed.type === 'order:notification' && parsed.payload) {
-          const notif = parsed.payload;
+          const notif = parsed.payload as OrderNotificationRecord;
           setOrderNotifications((prev) => [
             notif,
             ...prev.filter((n) => n.id !== notif.id),
           ].slice(0, 50));
           setLiveToastNotification(notif);
+        } else if (parsed.type === 'sale:webhook' && parsed.payload) {
+          const wh = parsed.payload as SaleWebhookDeliveryRecord;
+          setWebhookDeliveries((prev) => [
+            wh,
+            ...prev.filter((w) => w.id !== wh.id),
+          ].slice(0, 50));
+          setLiveToastWebhook(wh);
         }
       } catch {
         // Ignore malformed SSE event
@@ -125,6 +143,14 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
     }, 9000);
     return () => window.clearTimeout(timer);
   }, [liveToastNotification]);
+
+  useEffect(() => {
+    if (!liveToastWebhook) return;
+    const timer = window.setTimeout(() => {
+      setLiveToastWebhook(null);
+    }, 8000);
+    return () => window.clearTimeout(timer);
+  }, [liveToastWebhook]);
 
   const alerts = useMemo(() => {
     const lowStock = products
@@ -442,10 +468,44 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
                       Fechar
                     </button>
                   </div>
-                  {orderNotifications.length === 0 && alerts.length === 0 ? (
+                  {orderNotifications.length === 0 &&
+                  webhookDeliveries.length === 0 &&
+                  alerts.length === 0 ? (
                     <p className="text-xs text-[#72726E]">Sem alertas pendentes neste momento.</p>
                   ) : (
                     <div className="space-y-2.5 max-h-80 overflow-y-auto pr-0.5">
+                      {webhookDeliveries.slice(0, 4).map((wh) => (
+                        <button
+                          key={wh.id}
+                          type="button"
+                          onClick={() => {
+                            onSelectTab('settings');
+                            setNotificationsOpen(false);
+                          }}
+                          className="w-full text-left p-3 rounded-xl bg-[#F2F1EE] hover:bg-[#E7E6E1] text-[#1C1C1E] transition-colors cursor-pointer space-y-1 border border-black/8"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider font-semibold text-[#555552]">
+                              <Webhook className="w-3 h-3" />
+                              <span>Webhook · {wh.targetHost}</span>
+                            </span>
+                            <span
+                              className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                                wh.status === 'sent'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-amber-100 text-amber-800'
+                              }`}
+                            >
+                              {wh.status === 'sent'
+                                ? `Enviado (${wh.httpStatus || 200})`
+                                : wh.status === 'unconfigured'
+                                ? 'Sem URL'
+                                : 'Falha'}
+                            </span>
+                          </div>
+                          <p className="text-xs font-semibold leading-snug">{wh.title}</p>
+                        </button>
+                      ))}
                       {orderNotifications.slice(0, 6).map((notif) => (
                         <button
                           key={notif.id}
@@ -626,6 +686,53 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
               className="font-semibold underline hover:text-white cursor-pointer shrink-0"
             >
               Ver Encomenda
+            </button>
+          </div>
+        </div>
+      )}
+      {/* Real-time Approved Sale Webhook Toast */}
+      {liveToastWebhook && !liveToastNotification && (
+        <div className="fixed bottom-5 right-5 z-50 w-[340px] max-w-[calc(100vw-2rem)] bg-[#1C1C1E] text-white rounded-2xl p-4 shadow-2xl border border-white/10 space-y-2">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <Webhook
+                className={`w-4 h-4 shrink-0 ${
+                  liveToastWebhook.status === 'sent' ? 'text-emerald-400' : 'text-amber-400'
+                }`}
+              />
+              <span className="text-[11px] uppercase tracking-wider font-semibold text-white/80 truncate">
+                Webhook de Venda Aprovada
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setLiveToastWebhook(null)}
+              aria-label="Fechar notificação de webhook"
+              className="text-white/70 hover:text-white cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <p className="text-sm font-semibold leading-snug">{liveToastWebhook.title}</p>
+          <p className="text-xs text-white/80">
+            {liveToastWebhook.customerName} ·{' '}
+            {formatMoney(liveToastWebhook.total, liveToastWebhook.currencySymbol)}
+          </p>
+          <div className="flex items-center justify-between pt-1 text-[11px]">
+            <span className="text-white/70 truncate">
+              {liveToastWebhook.status === 'sent'
+                ? `Enviado (${liveToastWebhook.httpStatus || 200}) → ${liveToastWebhook.targetHost}`
+                : liveToastWebhook.errorMessage || liveToastWebhook.targetHost}
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                onSelectTab('settings');
+                setLiveToastWebhook(null);
+              }}
+              className="font-semibold underline hover:text-white cursor-pointer shrink-0"
+            >
+              Configurar
             </button>
           </div>
         </div>

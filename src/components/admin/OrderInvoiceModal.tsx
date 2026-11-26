@@ -113,7 +113,7 @@ export const OrderInvoiceModal: React.FC<OrderInvoiceModalProps> = ({
                     : 'bg-[#1C1C1E] text-white hover:bg-[#323235]'
                 }`}
               >
-                {isPaid ? 'Mudar para Pendente' : 'Marcar Entregue (Pago)'}
+                {isPaid ? 'Mudar para Pendente' : 'Aprovar Pedido (Entregue · Pago)'}
               </button>
             )}
 

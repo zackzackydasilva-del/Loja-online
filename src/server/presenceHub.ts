@@ -5,6 +5,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type {
   LiveVisitorSession,
   OrderNotificationRecord,
+  SaleWebhookDeliveryRecord,
   StoreAnalyticsEvent,
   StoreOrder,
   VisitorStage,
@@ -83,6 +84,10 @@ function broadcastToAdmins(message: { type: string; payload: unknown }) {
 
 export function broadcastOrderNotification(record: OrderNotificationRecord): void {
   broadcastToAdmins({ type: 'order:notification', payload: record });
+}
+
+export function broadcastSaleWebhookDelivery(record: SaleWebhookDeliveryRecord): void {
+  broadcastToAdmins({ type: 'sale:webhook', payload: record });
 }
 
 function sanitizeText(val: unknown, max = 120): string | undefined {

@@ -17,6 +17,7 @@ import type {
   ProductCategory,
   ProductColorVariant,
   ProductSizeMeasurement,
+  SaleWebhookDeliveryRecord,
   StockMovement,
   StoreAnalyticsEvent,
   StoreCampaign,
@@ -141,6 +142,10 @@ function mergeStorefrontConfig(raw: unknown): StorefrontConfig {
       ...DEFAULT_STOREFRONT_CONFIG.orderNotification!,
       ...(obj.orderNotification || {}),
     },
+    saleWebhook: {
+      ...DEFAULT_STOREFRONT_CONFIG.saleWebhook!,
+      ...(obj.saleWebhook || {}),
+    },
     guarantees:
       Array.isArray(obj.guarantees) && obj.guarantees.length > 0
         ? obj.guarantees
@@ -205,6 +210,12 @@ function mergeStorefrontConfigPatch(
           ...patch.orderNotification,
         }
       : base.orderNotification || DEFAULT_STOREFRONT_CONFIG.orderNotification!,
+    saleWebhook: patch.saleWebhook
+      ? {
+          ...(base.saleWebhook || DEFAULT_STOREFRONT_CONFIG.saleWebhook!),
+          ...patch.saleWebhook,
+        }
+      : base.saleWebhook || DEFAULT_STOREFRONT_CONFIG.saleWebhook!,
     newsletter: {
       ...base.newsletter,
       ...(patch.newsletter || {}),
@@ -228,13 +239,15 @@ const STOREFRONT_CONFIG_META_ID = '__lunora_storefront_config__';
 const STORE_COSTS_META_ID = '__lunora_store_costs__';
 const STORE_ANALYTICS_META_ID = '__lunora_analytics_events__';
 const STORE_ORDER_NOTIFICATIONS_META_ID = '__lunora_order_notifications__';
+const STORE_WEBHOOK_LOGS_META_ID = '__lunora_sale_webhooks__';
 
 function isMetaIntegrationId(id: unknown): boolean {
   return (
     id === STOREFRONT_CONFIG_META_ID ||
     id === STORE_COSTS_META_ID ||
     id === STORE_ANALYTICS_META_ID ||
-    id === STORE_ORDER_NOTIFICATIONS_META_ID
+    id === STORE_ORDER_NOTIFICATIONS_META_ID ||
+    id === STORE_WEBHOOK_LOGS_META_ID
   );
 }
 
@@ -315,12 +328,37 @@ function normalizeEmbeddedOrderNotification(item: unknown): OrderNotificationRec
   };
 }
 
+function normalizeEmbeddedWebhookDelivery(item: unknown): SaleWebhookDeliveryRecord | null {
+  if (!item || typeof item !== 'object') return null;
+  const rec = item as Record<string, unknown>;
+  const id = String(rec.id || '').trim();
+  const orderId = String(rec.orderId || '').trim();
+  const title = String(rec.title || '').trim();
+  if (!id || !orderId || !title) return null;
+  return {
+    id,
+    orderId,
+    event: 'sale.approved',
+    title,
+    targetHost: String(rec.targetHost || ''),
+    status: (String(rec.status || 'failed') as SaleWebhookDeliveryRecord['status']),
+    httpStatus: rec.httpStatus !== undefined ? Number(rec.httpStatus) : undefined,
+    errorMessage: rec.errorMessage ? String(rec.errorMessage) : undefined,
+    total: Number(rec.total ?? 0),
+    currencySymbol: String(rec.currencySymbol || 'Kz'),
+    customerName: String(rec.customerName || ''),
+    createdAt: String(rec.createdAt || new Date().toISOString()),
+    isTest: Boolean(rec.isTest),
+  };
+}
+
 function extractIntegrationsAndConfig(rawIntegrations: unknown): {
   integrations: StoreSettings['integrations'];
   embeddedConfig: Partial<StorefrontConfig> | null;
   embeddedCosts: StoreCost[];
   embeddedEvents: StoreAnalyticsEvent[];
   embeddedNotifications: OrderNotificationRecord[];
+  embeddedWebhooks: SaleWebhookDeliveryRecord[];
 } {
   if (!Array.isArray(rawIntegrations)) {
     return {
@@ -329,6 +367,7 @@ function extractIntegrationsAndConfig(rawIntegrations: unknown): {
       embeddedCosts: [],
       embeddedEvents: [],
       embeddedNotifications: [],
+      embeddedWebhooks: [],
     };
   }
   const integrations: StoreSettings['integrations'] = [];
@@ -336,6 +375,7 @@ function extractIntegrationsAndConfig(rawIntegrations: unknown): {
   let embeddedCosts: StoreCost[] = [];
   let embeddedEvents: StoreAnalyticsEvent[] = [];
   let embeddedNotifications: OrderNotificationRecord[] = [];
+  let embeddedWebhooks: SaleWebhookDeliveryRecord[] = [];
   for (const item of rawIntegrations) {
     if (item && typeof item === 'object') {
       const rec = item as Record<string, unknown>;
@@ -369,10 +409,25 @@ function extractIntegrationsAndConfig(rawIntegrations: unknown): {
         }
         continue;
       }
+      if (rec.id === STORE_WEBHOOK_LOGS_META_ID) {
+        if (Array.isArray(rec.webhooks)) {
+          embeddedWebhooks = rec.webhooks
+            .map(normalizeEmbeddedWebhookDelivery)
+            .filter((w): w is SaleWebhookDeliveryRecord => w !== null);
+        }
+        continue;
+      }
       integrations.push(item as StoreSettings['integrations'][number]);
     }
   }
-  return { integrations, embeddedConfig, embeddedCosts, embeddedEvents, embeddedNotifications };
+  return {
+    integrations,
+    embeddedConfig,
+    embeddedCosts,
+    embeddedEvents,
+    embeddedNotifications,
+    embeddedWebhooks,
+  };
 }
 
 function packIntegrationsWithConfig(
@@ -380,7 +435,8 @@ function packIntegrationsWithConfig(
   config: StorefrontConfig | null,
   costs: StoreCost[] = [],
   events: StoreAnalyticsEvent[] = [],
-  notifications: OrderNotificationRecord[] = []
+  notifications: OrderNotificationRecord[] = [],
+  webhooks: SaleWebhookDeliveryRecord[] = []
 ): unknown[] {
   const clean = visibleIntegrations.filter((i) => i && !isMetaIntegrationId(i.id));
   const packed: unknown[] = [...clean];
@@ -420,12 +476,35 @@ function packIntegrationsWithConfig(
       notifications: notifications.slice(0, 100),
     });
   }
+  if (webhooks.length > 0) {
+    packed.push({
+      id: STORE_WEBHOOK_LOGS_META_ID,
+      name: 'sale_webhooks',
+      role: 'system',
+      connected: false,
+      webhooks: webhooks.slice(0, 100),
+    });
+  }
   return packed;
 }
 
 function stripAdminOnlyStorefrontFields(cfg: StorefrontConfig): StorefrontConfig {
-  const { orderNotification: _hidden, ...publicSf } = cfg;
+  const { orderNotification: _hidden, saleWebhook: _hiddenWebhook, ...publicSf } = cfg;
   return publicSf;
+}
+
+function sanitizeAdminStorefrontConfig(cfg: StorefrontConfig): StorefrontConfig {
+  if (!cfg.saleWebhook) return cfg;
+  const hasSecret = Boolean(cfg.saleWebhook.secret?.trim());
+  return {
+    ...cfg,
+    saleWebhook: {
+      enabled: Boolean(cfg.saleWebhook.enabled),
+      url: cfg.saleWebhook.url || '',
+      secret: '',
+      hasSecret,
+    },
+  };
 }
 
 function resolveStorefrontFromRow(row: Record<string, unknown> | null): StorefrontConfig | null {
@@ -461,6 +540,7 @@ interface MemoryStore {
   livePresence: LiveVisitorSession[];
   analyticsEvents: StoreAnalyticsEvent[];
   orderNotifications: OrderNotificationRecord[];
+  saleWebhooks: SaleWebhookDeliveryRecord[];
 }
 
 const memoryStore: MemoryStore = {
@@ -479,6 +559,7 @@ const memoryStore: MemoryStore = {
   livePresence: [],
   analyticsEvents: [],
   orderNotifications: [],
+  saleWebhooks: [],
 };
 
 let cachedClient: SupabaseClient | null = null;
@@ -1444,10 +1525,15 @@ export async function getAdminBundle() {
                 integrations: Array.isArray(row.integrations)
                   ? cleanIntegrations
                   : memoryStore.settings.integrations,
-                storefrontConfig: resolvedSf,
+                storefrontConfig: sanitizeAdminStorefrontConfig(resolvedSf),
               };
             })()
-          : memoryStore.settings,
+          : {
+              ...memoryStore.settings,
+              storefrontConfig: sanitizeAdminStorefrontConfig(
+                memoryStore.settings.storefrontConfig
+              ),
+            },
         newsletterEmails: (newsRes.data ?? []).map((n) => String(n.email)),
         persistence: 'supabase' as const,
       };
@@ -1464,7 +1550,10 @@ export async function getAdminBundle() {
     campaigns: memoryStore.campaigns,
     weeklySales: memoryStore.weeklySales,
     costs: memoryStore.costs,
-    settings: memoryStore.settings,
+    settings: {
+      ...memoryStore.settings,
+      storefrontConfig: sanitizeAdminStorefrontConfig(memoryStore.settings.storefrontConfig),
+    },
     newsletterEmails: memoryStore.newsletterEmails,
     persistence: 'memory' as const,
   };
@@ -2324,7 +2413,10 @@ export async function createManualOrderInStore(input: {
   return newOrder;
 }
 
-export async function updateOrderStatusInStore(orderId: string, status: OrderStatus) {
+export async function updateOrderStatusInStore(
+  orderId: string,
+  status: OrderStatus
+): Promise<{ order: StoreOrder | null; transitionedToApproved: boolean }> {
   const stepMap: Record<OrderStatus, number> = {
     Pendente: 1,
     'Em Preparação': 1,
@@ -2338,7 +2430,7 @@ export async function updateOrderStatusInStore(orderId: string, status: OrderSta
     await ensureSupabaseSeeded(supabase).catch(() => false);
     const { data: existingOrder } = await supabase
       .from('orders')
-      .select('status, total')
+      .select('*')
       .eq('id', orderId)
       .maybeSingle();
 
@@ -2371,16 +2463,48 @@ export async function updateOrderStatusInStore(orderId: string, status: OrderSta
       .from('tasks')
       .update({ notify: !isPaid, pinned: !isPaid })
       .eq('order_id', orderId);
-    return;
+
+    let fullOrder: StoreOrder | null = null;
+    if (existingOrder) {
+      const { data: itemRows } = await supabase
+        .from('order_items')
+        .select('*')
+        .eq('order_id', orderId);
+      const relationalItems: OrderItemSummary[] = (itemRows ?? []).map((row) => ({
+        productId: row.product_id ? String(row.product_id) : '',
+        name: String(row.product_name),
+        size: String(row.size),
+        quantity: Number(row.quantity),
+        unitPrice: Number(row.unit_price),
+      }));
+      fullOrder = mapOrderFromRow(
+        {
+          ...(existingOrder as Record<string, unknown>),
+          status,
+          progress_step: progressStep,
+        },
+        relationalItems
+      );
+    }
+
+    return {
+      order: fullOrder,
+      transitionedToApproved: prevStatus !== null && !wasPaid && isPaid,
+    };
   }
 
-  const target = memoryStore.orders.find((o) => o.id === orderId);
+  const target = memoryStore.orders.find((o) => o.id === orderId) || null;
   const wasPaid = target?.status === 'Entregue';
   const isPaid = status === 'Entregue';
 
-  memoryStore.orders = memoryStore.orders.map((o) =>
-    o.id === orderId ? { ...o, status, progressStep } : o
-  );
+  let updatedOrder: StoreOrder | null = null;
+  memoryStore.orders = memoryStore.orders.map((o) => {
+    if (o.id === orderId) {
+      updatedOrder = { ...o, status, progressStep };
+      return updatedOrder;
+    }
+    return o;
+  });
 
   if (target && wasPaid !== isPaid && target.total > 0) {
     const lastIdx = memoryStore.weeklySales.length - 1;
@@ -2396,6 +2520,11 @@ export async function updateOrderStatusInStore(orderId: string, status: OrderSta
   memoryStore.tasks = memoryStore.tasks.map((t) =>
     t.orderId === orderId ? { ...t, notify: !isPaid, pinned: !isPaid } : t
   );
+
+  return {
+    order: updatedOrder,
+    transitionedToApproved: Boolean(target && !wasPaid && isPaid),
+  };
 }
 
 export async function deleteOrderInStore(orderId: string) {
@@ -2836,7 +2965,21 @@ export async function updateSettingsInStore(
   categoryRenames: CategoryRenameEntry[] = []
 ): Promise<StoreSettings> {
   if (updates.storefrontConfig !== undefined) {
-    memoryStore.settings.storefrontConfig = mergeStorefrontConfig(updates.storefrontConfig);
+    const prevWebhookSecret = memoryStore.settings.storefrontConfig.saleWebhook?.secret || '';
+    const mergedMem = mergeStorefrontConfig(updates.storefrontConfig);
+    if (mergedMem.saleWebhook) {
+      const clearMemSecret = Boolean(mergedMem.saleWebhook.clearSecret);
+      const nextMemSecret = clearMemSecret
+        ? ''
+        : mergedMem.saleWebhook.secret?.trim() || prevWebhookSecret;
+      mergedMem.saleWebhook = {
+        enabled: Boolean(mergedMem.saleWebhook.enabled),
+        url: mergedMem.saleWebhook.url?.trim() || '',
+        secret: nextMemSecret,
+        hasSecret: Boolean(nextMemSecret),
+      };
+    }
+    memoryStore.settings.storefrontConfig = mergedMem;
   }
   if (categoryRenames.length > 0) {
     for (const rename of categoryRenames) {
@@ -2910,6 +3053,7 @@ export async function updateSettingsInStore(
       embeddedCosts: currentEmbeddedCosts,
       embeddedEvents: currentEmbeddedEvents,
       embeddedNotifications: currentEmbeddedNotifications,
+      embeddedWebhooks: currentEmbeddedWebhooks,
     } = extractIntegrationsAndConfig(currentRow?.integrations);
     const currentStorefrontConfig =
       resolveStorefrontFromRow(currentRow) || memoryStore.settings.storefrontConfig;
@@ -2922,6 +3066,19 @@ export async function updateSettingsInStore(
     let nextStorefrontConfig: StorefrontConfig | null = null;
     if (updates.storefrontConfig !== undefined) {
       const merged = mergeStorefrontConfigPatch(currentStorefrontConfig, updates.storefrontConfig);
+      if (merged.saleWebhook) {
+        const incomingWebhook = updates.storefrontConfig.saleWebhook;
+        const clearSecret = Boolean(incomingWebhook?.clearSecret);
+        const incomingSecret = typeof incomingWebhook?.secret === 'string' ? incomingWebhook.secret.trim() : '';
+        const existingSecret = currentStorefrontConfig.saleWebhook?.secret?.trim() || '';
+        const finalSecret = clearSecret ? '' : incomingSecret || existingSecret;
+        merged.saleWebhook = {
+          enabled: Boolean(merged.saleWebhook.enabled),
+          url: merged.saleWebhook.url?.trim() || '',
+          secret: finalSecret,
+          hasSecret: Boolean(finalSecret),
+        };
+      }
       merged.heroSlides = await Promise.all(
         merged.heroSlides.map(async (s) => ({
           ...s,
@@ -3037,7 +3194,8 @@ export async function updateSettingsInStore(
           null,
           currentEmbeddedCosts,
           currentEmbeddedEvents,
-          currentEmbeddedNotifications
+          currentEmbeddedNotifications,
+          currentEmbeddedWebhooks
         );
       }
       if (nextStorefrontConfig) {
@@ -3051,7 +3209,8 @@ export async function updateSettingsInStore(
           configToEmbed,
           currentEmbeddedCosts,
           currentEmbeddedEvents,
-          currentEmbeddedNotifications
+          currentEmbeddedNotifications,
+          currentEmbeddedWebhooks
         );
       }
     }
@@ -3068,9 +3227,12 @@ export async function updateSettingsInStore(
         freeShippingThreshold: Number(savedRow.free_shipping_threshold),
         supportEmail: String(savedRow.support_email),
         integrations: cleanInt,
+        storefrontConfig: sanitizeAdminStorefrontConfig(resolvedSf),
+      };
+      memoryStore.settings = {
+        ...mapped,
         storefrontConfig: resolvedSf,
       };
-      memoryStore.settings = mapped;
       return mapped;
     };
 
@@ -3092,7 +3254,8 @@ export async function updateSettingsInStore(
               configToEmbed,
               currentEmbeddedCosts,
               currentEmbeddedEvents,
-              currentEmbeddedNotifications
+              currentEmbeddedNotifications,
+              currentEmbeddedWebhooks
             );
             res = await supabase
               .from('store_settings')
@@ -3132,23 +3295,48 @@ export async function updateSettingsInStore(
         } else {
           return mapRowToSettings(data[0] as Record<string, unknown>);
         }
-        return memoryStore.settings;
+        return {
+          ...memoryStore.settings,
+          storefrontConfig: sanitizeAdminStorefrontConfig(memoryStore.settings.storefrontConfig),
+        };
       })();
       invalidatePublicStoreCache();
       return saved;
     }
     invalidatePublicStoreCache();
-    return memoryStore.settings;
+    return {
+      ...memoryStore.settings,
+      storefrontConfig: sanitizeAdminStorefrontConfig(memoryStore.settings.storefrontConfig),
+    };
   }
   invalidatePublicStoreCache();
+  const prevSecretMem = memoryStore.settings.storefrontConfig.saleWebhook?.secret || '';
+  const mergedMemSf = updates.storefrontConfig
+    ? mergeStorefrontConfig(updates.storefrontConfig)
+    : memoryStore.settings.storefrontConfig;
+  if (updates.storefrontConfig && mergedMemSf.saleWebhook) {
+    const clearMem = Boolean(updates.storefrontConfig.saleWebhook?.clearSecret);
+    const incomingMemSecret =
+      typeof updates.storefrontConfig.saleWebhook?.secret === 'string'
+        ? updates.storefrontConfig.saleWebhook.secret.trim()
+        : '';
+    const finalMemSecret = clearMem ? '' : incomingMemSecret || prevSecretMem;
+    mergedMemSf.saleWebhook = {
+      enabled: Boolean(mergedMemSf.saleWebhook.enabled),
+      url: mergedMemSf.saleWebhook.url?.trim() || '',
+      secret: finalMemSecret,
+      hasSecret: Boolean(finalMemSecret),
+    };
+  }
   memoryStore.settings = {
     ...memoryStore.settings,
     ...updates,
-    storefrontConfig: updates.storefrontConfig
-      ? mergeStorefrontConfig(updates.storefrontConfig)
-      : memoryStore.settings.storefrontConfig,
+    storefrontConfig: mergedMemSf,
   };
-  return memoryStore.settings;
+  return {
+    ...memoryStore.settings,
+    storefrontConfig: sanitizeAdminStorefrontConfig(memoryStore.settings.storefrontConfig),
+  };
 }
 
 export async function subscribeNewsletterInStore(email: string) {
@@ -3251,6 +3439,7 @@ async function syncEmbeddedCostsToSettings(
     embeddedCosts,
     embeddedEvents,
     embeddedNotifications,
+    embeddedWebhooks,
   } = extractIntegrationsAndConfig(currentRow?.integrations);
 
   const nextCosts = updater(embeddedCosts);
@@ -3259,7 +3448,8 @@ async function syncEmbeddedCostsToSettings(
     currentEmbeddedConfig ? mergeStorefrontConfig(currentEmbeddedConfig) : null,
     nextCosts,
     embeddedEvents,
-    embeddedNotifications
+    embeddedNotifications,
+    embeddedWebhooks
   );
 
   const { error } = await supabase
@@ -3491,6 +3681,7 @@ async function syncEmbeddedAnalyticsFallback(
     embeddedCosts,
     embeddedEvents,
     embeddedNotifications,
+    embeddedWebhooks,
   } = extractIntegrationsAndConfig(currentRow?.integrations);
 
   const merged = [event, ...embeddedEvents.filter((e) => e.id !== event.id)].slice(0, 400);
@@ -3499,7 +3690,8 @@ async function syncEmbeddedAnalyticsFallback(
     currentEmbeddedConfig ? mergeStorefrontConfig(currentEmbeddedConfig) : null,
     embeddedCosts,
     merged,
-    embeddedNotifications
+    embeddedNotifications,
+    embeddedWebhooks
   );
 
   const { error } = await supabase
@@ -3706,6 +3898,7 @@ export async function getOrderNotificationRuntimeContext(): Promise<{
   storeName: string;
   currencySymbol: string;
   orderNotification: { enabled: boolean; recipientEmail: string };
+  saleWebhook: { enabled: boolean; url: string; secret: string };
 }> {
   const supabase = getSupabaseClient();
   if (supabase) {
@@ -3738,6 +3931,12 @@ export async function getOrderNotificationRuntimeContext(): Promise<{
         recipientEmail:
           resolvedSf.orderNotification?.recipientEmail?.trim() || 'pintozacarias806@gmail.com',
       },
+      saleWebhook: {
+        enabled: resolvedSf.saleWebhook?.enabled ?? Boolean(process.env.ORDER_WEBHOOK_URL?.trim()),
+        url: resolvedSf.saleWebhook?.url?.trim() || process.env.ORDER_WEBHOOK_URL?.trim() || '',
+        secret:
+          resolvedSf.saleWebhook?.secret?.trim() || process.env.ORDER_WEBHOOK_SECRET?.trim() || '',
+      },
     };
   }
 
@@ -3750,6 +3949,11 @@ export async function getOrderNotificationRuntimeContext(): Promise<{
       enabled: sf.orderNotification?.enabled ?? true,
       recipientEmail:
         sf.orderNotification?.recipientEmail?.trim() || 'pintozacarias806@gmail.com',
+    },
+    saleWebhook: {
+      enabled: sf.saleWebhook?.enabled ?? Boolean(process.env.ORDER_WEBHOOK_URL?.trim()),
+      url: sf.saleWebhook?.url?.trim() || process.env.ORDER_WEBHOOK_URL?.trim() || '',
+      secret: sf.saleWebhook?.secret?.trim() || process.env.ORDER_WEBHOOK_SECRET?.trim() || '',
     },
   };
 }
@@ -3777,6 +3981,7 @@ export async function recordOrderNotificationInStore(
       embeddedCosts,
       embeddedEvents,
       embeddedNotifications,
+      embeddedWebhooks,
     } = extractIntegrationsAndConfig(currentRow?.integrations);
 
     const merged = [
@@ -3789,7 +3994,8 @@ export async function recordOrderNotificationInStore(
       currentEmbeddedConfig ? mergeStorefrontConfig(currentEmbeddedConfig) : null,
       embeddedCosts,
       embeddedEvents,
-      merged
+      merged,
+      embeddedWebhooks
     );
 
     await supabase.from('store_settings').update({ integrations: nextIntegrations }).eq('id', 1);
@@ -3824,4 +4030,78 @@ export async function getOrderNotificationsInStore(): Promise<OrderNotificationR
     }
   }
   return memoryStore.orderNotifications.slice(0, 100);
+}
+
+export async function recordSaleWebhookDeliveryInStore(
+  record: SaleWebhookDeliveryRecord
+): Promise<void> {
+  memoryStore.saleWebhooks = [
+    record,
+    ...memoryStore.saleWebhooks.filter((w) => w.id !== record.id),
+  ].slice(0, 100);
+
+  const supabase = getSupabaseClient();
+  if (!supabase) return;
+  try {
+    const { data: currentRowData } = await supabase
+      .from('store_settings')
+      .select('integrations')
+      .eq('id', 1)
+      .maybeSingle();
+    const currentRow = currentRowData as Record<string, unknown> | null;
+    const {
+      integrations: currentIntegrations,
+      embeddedConfig: currentEmbeddedConfig,
+      embeddedCosts,
+      embeddedEvents,
+      embeddedNotifications,
+      embeddedWebhooks,
+    } = extractIntegrationsAndConfig(currentRow?.integrations);
+
+    const merged = [
+      record,
+      ...embeddedWebhooks.filter((w) => w.id !== record.id),
+    ].slice(0, 100);
+
+    const nextIntegrations = packIntegrationsWithConfig(
+      currentIntegrations,
+      currentEmbeddedConfig ? mergeStorefrontConfig(currentEmbeddedConfig) : null,
+      embeddedCosts,
+      embeddedEvents,
+      embeddedNotifications,
+      merged
+    );
+
+    await supabase.from('store_settings').update({ integrations: nextIntegrations }).eq('id', 1);
+  } catch {
+    // Non-fatal log persistence error
+  }
+}
+
+export async function getSaleWebhookDeliveriesInStore(): Promise<SaleWebhookDeliveryRecord[]> {
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { data: rowData } = await supabase
+        .from('store_settings')
+        .select('integrations')
+        .eq('id', 1)
+        .maybeSingle();
+      const row = rowData as Record<string, unknown> | null;
+      const { embeddedWebhooks } = extractIntegrationsAndConfig(row?.integrations);
+      if (embeddedWebhooks.length > 0) {
+        const mergedMap = new Map<string, SaleWebhookDeliveryRecord>();
+        for (const w of embeddedWebhooks) mergedMap.set(w.id, w);
+        for (const w of memoryStore.saleWebhooks) {
+          if (!mergedMap.has(w.id)) mergedMap.set(w.id, w);
+        }
+        return Array.from(mergedMap.values())
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+          .slice(0, 100);
+      }
+    } catch {
+      // Fallback to memory store
+    }
+  }
+  return memoryStore.saleWebhooks.slice(0, 100);
 }

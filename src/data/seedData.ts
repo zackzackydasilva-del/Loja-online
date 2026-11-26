@@ -164,6 +164,12 @@ export const DEFAULT_STOREFRONT_CONFIG: StorefrontConfig = {
     enabled: true,
     recipientEmail: 'pintozacarias806@gmail.com',
   },
+  saleWebhook: {
+    enabled: false,
+    url: '',
+    secret: '',
+    hasSecret: false,
+  },
   catalogEyebrow: 'Catálogo',
   catalogTitle: 'As Nossas Escolhas Favoritas',
   guarantees: [

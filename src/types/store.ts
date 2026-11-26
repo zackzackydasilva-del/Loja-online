@@ -211,6 +211,30 @@ export interface OrderEmailNotificationConfig {
   recipientEmail: string;
 }
 
+export interface SaleWebhookConfig {
+  enabled: boolean;
+  url: string;
+  secret?: string;
+  hasSecret?: boolean;
+  clearSecret?: boolean;
+}
+
+export interface SaleWebhookDeliveryRecord {
+  id: string;
+  orderId: string;
+  event: 'sale.approved';
+  title: string;
+  targetHost: string;
+  status: 'sent' | 'failed' | 'unconfigured' | 'disabled' | 'blocked';
+  httpStatus?: number;
+  errorMessage?: string;
+  total: number;
+  currencySymbol: string;
+  customerName: string;
+  createdAt: string;
+  isTest?: boolean;
+}
+
 export interface OrderNotificationItemDetail {
   productId: string;
   name: string;
@@ -272,6 +296,7 @@ export interface StorefrontConfig {
   entryPopup?: StorePopupConfig;
   postCheckoutPopup?: StorePopupConfig;
   orderNotification?: OrderEmailNotificationConfig;
+  saleWebhook?: SaleWebhookConfig;
   catalogEyebrow: string;
   catalogTitle: string;
   guarantees: TrustBadgeConfig[];

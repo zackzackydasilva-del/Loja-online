@@ -17,6 +17,7 @@ import {
   getAdminPasswordHash,
   getOrderNotificationsInStore,
   getPublicStoreData,
+  getSaleWebhookDeliveriesInStore,
   resetDemoDataInStore,
   saveAdminPasswordHash,
   subscribeNewsletterInStore,
@@ -34,6 +35,11 @@ import {
   notifyNewOrderAsync,
   sendTestOrderNotificationAsync,
 } from './orderNotificationService.ts';
+import {
+  notifyApprovedSaleWebhookAsync,
+  sendTestSaleWebhookAsync,
+  validateWebhookUrlSyntax,
+} from './saleWebhookService.ts';
 import {
   getAuthoritativeRealtimeSnapshot,
   processPresenceLeaveAsync,
@@ -361,10 +367,15 @@ app.get('/api/admin/analytics/live', requireAdminAuth, async (_req, res) => {
 
 app.get('/api/admin/notifications', requireAdminAuth, async (_req, res) => {
   try {
-    const notifications = await getOrderNotificationsInStore();
+    const [notifications, webhooks] = await Promise.all([
+      getOrderNotificationsInStore(),
+      getSaleWebhookDeliveriesInStore(),
+    ]);
     res.json({
       notifications,
+      webhooks,
       transport: getEmailTransportStatus(),
+      webhookEnvConfigured: Boolean(process.env.ORDER_WEBHOOK_URL?.trim()),
     });
   } catch (err) {
     console.error('GET /api/admin/notifications failed:', err);
@@ -388,6 +399,31 @@ app.post('/api/admin/notifications/test', requireAdminAuth, async (req, res) => 
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Erro ao testar envio de notificação.';
+    res.status(400).json({ error: message });
+  }
+});
+
+app.post('/api/admin/webhooks/test', requireAdminAuth, async (req, res) => {
+  try {
+    const rawUrl = typeof req.body?.url === 'string' ? req.body.url.trim() : '';
+    const rawSecret = typeof req.body?.secret === 'string' ? req.body.secret.trim() : '';
+    if (rawUrl) {
+      const syntax = validateWebhookUrlSyntax(rawUrl);
+      if (!syntax.valid) {
+        res.status(400).json({ error: syntax.error || 'URL de webhook inválido.' });
+        return;
+      }
+    }
+    const delivery = await sendTestSaleWebhookAsync({
+      urlOverride: rawUrl || undefined,
+      secretOverride: rawSecret || undefined,
+    });
+    res.json({
+      ok: true,
+      delivery,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Erro ao testar webhook.';
     res.status(400).json({ error: message });
   }
 });
@@ -582,6 +618,12 @@ app.post('/api/admin/orders', requireAdminAuth, async (req, res) => {
       discountApplied: Boolean(body.discountApplied),
     });
 
+    if (order.status === 'Entregue') {
+      await notifyApprovedSaleWebhookAsync(order).catch((whErr) => {
+        console.warn('Approved sale webhook warning:', whErr);
+      });
+    }
+
     res.status(201).json(order);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Erro ao registar encomenda manual.';
@@ -596,8 +638,13 @@ app.patch('/api/admin/orders/:id/status', requireAdminAuth, async (req, res) => 
     res.status(400).json({ error: 'Estado inválido.' });
     return;
   }
-  await updateOrderStatusInStore(req.params.id, status);
-  res.json({ ok: true });
+  const result = await updateOrderStatusInStore(req.params.id, status);
+  if (result.transitionedToApproved && result.order) {
+    await notifyApprovedSaleWebhookAsync(result.order).catch((whErr) => {
+      console.warn('Approved sale webhook warning:', whErr);
+    });
+  }
+  res.json({ ok: true, order: result.order });
 });
 
 app.delete('/api/admin/orders/:id', requireAdminAuth, async (req, res) => {
@@ -1003,6 +1050,25 @@ app.patch('/api/admin/settings', requireAdminAuth, async (req, res) => {
             rawEmail && isValidEmailAddress(rawEmail)
               ? rawEmail
               : 'pintozacarias806@gmail.com',
+        };
+      }
+      if (cfg.saleWebhook !== undefined && cfg.saleWebhook && typeof cfg.saleWebhook === 'object') {
+        const rawUrl =
+          typeof cfg.saleWebhook.url === 'string' ? cfg.saleWebhook.url.trim().slice(0, 500) : '';
+        if (rawUrl) {
+          const syntax = validateWebhookUrlSyntax(rawUrl);
+          if (!syntax.valid) {
+            res.status(400).json({ error: syntax.error || 'URL de webhook inválido.' });
+            return;
+          }
+        }
+        const rawSecret =
+          typeof cfg.saleWebhook.secret === 'string' ? cfg.saleWebhook.secret.trim().slice(0, 200) : '';
+        cfg.saleWebhook = {
+          enabled: Boolean(cfg.saleWebhook.enabled),
+          url: rawUrl,
+          secret: rawSecret,
+          clearSecret: Boolean(cfg.saleWebhook.clearSecret),
         };
       }
 
