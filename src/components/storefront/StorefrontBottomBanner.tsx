@@ -39,14 +39,14 @@ export const StorefrontBottomBanner: React.FC<StorefrontBottomBannerProps> = ({
       aria-label="Banner de destaque após produtos"
       className={compact ? 'bg-white pt-2 pb-6 sm:pb-8' : 'bg-white pt-2 pb-10 sm:pb-14'}
     >
-      <div className="max-w-[1360px] lg:max-w-[820px] xl:max-w-[880px] mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="max-w-[1360px] lg:max-w-[96vw] xl:max-w-[1540px] 2xl:max-w-[1620px] mx-auto px-4 sm:px-6 lg:px-8">
         {hasVisualSlides && currentSlide ? (
           <div className="relative rounded-[22px] sm:rounded-[28px] overflow-hidden bg-[#09090B] text-white shadow-[0_14px_34px_-18px_rgba(0,0,0,0.4)]">
-            {/* Complete full-bleed image filling the entire banner with zero empty space */}
+            {/* Complete full-bleed image covering the entire horizontal banner length */}
             <SafeImage
               src={currentSlide.image}
               alt={currentSlide.caption || bottomBanner.title}
-              className="w-full h-auto block transition-opacity duration-300"
+              className="w-full h-auto lg:h-[300px] xl:h-[330px] lg:object-cover lg:object-center block transition-opacity duration-300"
             />
 
             {/* Dark effects strictly on the outer borders/edges only */}
@@ -108,7 +108,7 @@ export const StorefrontBottomBanner: React.FC<StorefrontBottomBannerProps> = ({
           </div>
         ) : (
           /* Empty dark card before images are uploaded from Gestão */
-          <div className="relative rounded-[22px] sm:rounded-[28px] overflow-hidden bg-[radial-gradient(circle_at_74%_44%,#2C2C32_0%,#141417_54%,#09090B_100%)] text-white p-6 sm:p-9 lg:p-9 xl:p-10 min-h-[210px] sm:min-h-[280px] lg:min-h-[270px] xl:min-h-[290px] flex flex-col justify-between shadow-[0_14px_34px_-18px_rgba(0,0,0,0.4)]">
+          <div className="relative rounded-[22px] sm:rounded-[28px] overflow-hidden bg-[radial-gradient(circle_at_74%_44%,#2C2C32_0%,#141417_54%,#09090B_100%)] text-white p-6 sm:p-9 lg:p-9 xl:p-10 min-h-[210px] sm:min-h-[280px] lg:h-[300px] xl:h-[330px] flex flex-col justify-between shadow-[0_14px_34px_-18px_rgba(0,0,0,0.4)]">
             <div className="max-w-2xl">
               <h2 className="text-[18px] sm:text-3xl lg:text-[34px] xl:text-[38px] font-semibold tracking-tight uppercase leading-[1.08] text-white">
                 {bottomBanner.title || fallbackBanner.title}
