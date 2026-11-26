@@ -355,8 +355,53 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
                 ))}
               </div>
 
-              <div className="pt-3 border-t border-white/10 space-y-1">
-                <div className="flex justify-between items-center font-semibold">
+              <div className="pt-3 border-t border-white/10 space-y-1.5">
+                {(() => {
+                  const itemsSubtotal =
+                    typeof selectedOrder.subtotal === 'number'
+                      ? selectedOrder.subtotal
+                      : selectedOrder.items.reduce(
+                          (sum, item) => sum + item.unitPrice * item.quantity,
+                          0
+                        );
+                  const discountValue =
+                    typeof selectedOrder.discountAmount === 'number'
+                      ? selectedOrder.discountAmount
+                      : Math.max(0, itemsSubtotal - selectedOrder.total);
+                  const shippingValue =
+                    typeof selectedOrder.shippingFee === 'number'
+                      ? selectedOrder.shippingFee
+                      : Math.max(0, selectedOrder.total - (itemsSubtotal - discountValue));
+                  return (
+                    <>
+                      <div className="flex justify-between items-center text-xs text-white/70">
+                        <span>Subtotal</span>
+                        <span className="font-mono tabular-nums whitespace-nowrap">
+                          {formatMoney(itemsSubtotal, settings.currencySymbol)}
+                        </span>
+                      </div>
+                      {discountValue > 0 && (
+                        <div className="flex justify-between items-center text-xs text-emerald-300">
+                          <span>
+                            Desconto{selectedOrder.promoCode ? ` (${selectedOrder.promoCode})` : ''}
+                          </span>
+                          <span className="font-mono tabular-nums whitespace-nowrap">
+                            -{formatMoney(discountValue, settings.currencySymbol)}
+                          </span>
+                        </div>
+                      )}
+                      {shippingValue > 0 && (
+                        <div className="flex justify-between items-center text-xs text-white/70">
+                          <span>Taxa de Entrega</span>
+                          <span className="font-mono tabular-nums whitespace-nowrap">
+                            {formatMoney(shippingValue, settings.currencySymbol)}
+                          </span>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+                <div className="flex justify-between items-center font-semibold pt-1 border-t border-white/10">
                   <span className="text-sm">Total da Encomenda</span>
                   <span className="text-lg font-mono tabular-nums whitespace-nowrap">
                     {formatMoney(selectedOrder.total, settings.currencySymbol)}

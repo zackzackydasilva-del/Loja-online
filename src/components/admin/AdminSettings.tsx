@@ -17,6 +17,7 @@ import {
   Star,
   Tag,
   Trash2,
+  Volume2,
   Webhook,
 } from 'lucide-react';
 import { DEFAULT_STOREFRONT_CONFIG } from '../../data/seedData';
@@ -33,6 +34,7 @@ import {
 } from '../../types/store';
 import { formatMoney } from '../../utils/currency';
 import { buildCategoryUrl, buildProductUrl } from '../../utils/categoryLinks';
+import { playOrderNotificationSound } from '../../utils/notificationSound';
 import { ImageField } from './ImageField';
 
 type SettingsSection =
@@ -526,6 +528,77 @@ export const AdminSettings: React.FC = () => {
                     onChange={(e) => updateSfDraft({ ...sf, adminGreeting: e.target.value })}
                     className="w-full border border-black/15 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-[#1C1C1E]"
                   />
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-black/6 space-y-3">
+                <div>
+                  <p className="text-xs font-semibold text-[#1C1C1E]">
+                    Cupão de Desconto & Taxa de Entrega
+                  </p>
+                  <p className="text-[11px] text-[#72726E] mt-0.5">
+                    Defina o código do cupão promocional, a percentagem de desconto aplicada no saco e a taxa de entrega fixa (gratuita automaticamente acima do limiar de envio gratuito, quando &gt; 0).
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-[#555552] mb-1">
+                      Código do Cupão
+                    </label>
+                    <input
+                      type="text"
+                      value={sf.newsletter.promoCode}
+                      onChange={(e) =>
+                        updateSfDraft({
+                          ...sf,
+                          newsletter: { ...sf.newsletter, promoCode: e.target.value.toUpperCase() },
+                        })
+                      }
+                      placeholder="Ex: LUNORA10"
+                      className="w-full font-mono uppercase border border-black/15 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-[#1C1C1E]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-[#555552] mb-1">
+                      Desconto do Cupão (%)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="1"
+                      value={sf.promoDiscountPercent ?? 10}
+                      onChange={(e) =>
+                        updateSfDraft({
+                          ...sf,
+                          promoDiscountPercent: Math.max(
+                            0,
+                            Math.min(100, Number(e.target.value) || 0)
+                          ),
+                        })
+                      }
+                      className="w-full font-mono tabular-nums border border-black/15 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-[#1C1C1E]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-[#555552] mb-1">
+                      Taxa de Entrega ({currencySymbol || 'Kz'})
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={sf.shippingFee ?? 0}
+                      onChange={(e) =>
+                        updateSfDraft({
+                          ...sf,
+                          shippingFee: Math.max(0, Number(e.target.value) || 0),
+                        })
+                      }
+                      placeholder="0"
+                      className="w-full font-mono tabular-nums border border-black/15 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-[#1C1C1E]"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -1956,22 +2029,46 @@ export const AdminSettings: React.FC = () => {
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-[#555552] mb-1">
-                  Código Promocional Ativo no Saco (10% desconto)
-                </label>
-                <input
-                  type="text"
-                  value={sf.newsletter.promoCode}
-                  onChange={(e) =>
-                    updateSfDraft({
-                      ...sf,
-                      newsletter: { ...sf.newsletter, promoCode: e.target.value.toUpperCase() },
-                    })
-                  }
-                  placeholder="Ex: LUNORA10"
-                  className="w-full font-mono border border-black/15 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-[#1C1C1E]"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-[#555552] mb-1">
+                    Código Promocional Ativo no Saco
+                  </label>
+                  <input
+                    type="text"
+                    value={sf.newsletter.promoCode}
+                    onChange={(e) =>
+                      updateSfDraft({
+                        ...sf,
+                        newsletter: { ...sf.newsletter, promoCode: e.target.value.toUpperCase() },
+                      })
+                    }
+                    placeholder="Ex: LUNORA10"
+                    className="w-full font-mono uppercase border border-black/15 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-[#1C1C1E]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-[#555552] mb-1">
+                    Desconto do Cupão (%)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={sf.promoDiscountPercent ?? 10}
+                    onChange={(e) =>
+                      updateSfDraft({
+                        ...sf,
+                        promoDiscountPercent: Math.max(
+                          0,
+                          Math.min(100, Number(e.target.value) || 0)
+                        ),
+                      })
+                    }
+                    className="w-full font-mono tabular-nums border border-black/15 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-[#1C1C1E]"
+                  />
+                </div>
               </div>
             </section>
           </div>
@@ -2112,9 +2209,11 @@ export const AdminSettings: React.FC = () => {
           {/* REAL-TIME ORDER EMAIL NOTIFICATIONS CARD */}
           <section className="bg-white rounded-[24px] p-6 border border-black/5 space-y-4">
             {(() => {
-              const orderNotifCfg = sf.orderNotification || {
+              const orderNotifCfg = {
                 enabled: true,
+                soundEnabled: true,
                 recipientEmail: 'pintozacarias806@gmail.com',
+                ...(sf.orderNotification || {}),
               };
               const updateOrderNotif = (patch: Partial<typeof orderNotifCfg>) => {
                 updateSfDraft({
@@ -2130,6 +2229,9 @@ export const AdminSettings: React.FC = () => {
                 if (!adminToken) return;
                 setTestingEmail(true);
                 setTestEmailFeedback(null);
+                if (orderNotifCfg.soundEnabled !== false) {
+                  void playOrderNotificationSound();
+                }
                 try {
                   const res = await fetch('/api/admin/notifications/test', {
                     method: 'POST',
@@ -2191,29 +2293,50 @@ export const AdminSettings: React.FC = () => {
                       </div>
                       <div>
                         <h4 className="text-sm font-semibold text-[#1C1C1E]">
-                          Notificação de Pedido por Email em Tempo Real
+                          Notificação de Pedido por Email em Tempo Real & Alerta Sonoro
                         </h4>
                         <p className="text-[11px] text-[#72726E] mt-0.5 leading-relaxed">
-                          Sempre que o cliente concluir um pedido, é enviada a notificação &ldquo;Pedido de &#123;nome do produto, quantidade&#125;&rdquo; com a descrição completa de cada produto para o email abaixo.
+                          Sempre que o cliente concluir um pedido, é enviada a notificação prioritária &ldquo;Pedido de &#123;nome do produto, quantidade&#125;&rdquo; com descrições para o email abaixo e toca um som de alerta no painel.
                         </p>
                       </div>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => updateOrderNotif({ enabled: !orderNotifCfg.enabled })}
-                      className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-colors cursor-pointer shrink-0 ${
-                        orderNotifCfg.enabled
-                          ? 'bg-emerald-600 text-white'
-                          : 'bg-[#F5F4F0] text-[#555552] hover:text-[#1C1C1E]'
-                      }`}
-                    >
-                      {orderNotifCfg.enabled ? 'Ligado' : 'Desligado'}
-                    </button>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateOrderNotif({
+                            soundEnabled: orderNotifCfg.soundEnabled === false,
+                          })
+                        }
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors cursor-pointer ${
+                          orderNotifCfg.soundEnabled !== false
+                            ? 'bg-[#1C1C1E] text-white'
+                            : 'bg-[#F5F4F0] text-[#555552] hover:text-[#1C1C1E]'
+                        }`}
+                      >
+                        <Volume2 className="w-3.5 h-3.5" />
+                        <span>
+                          {orderNotifCfg.soundEnabled !== false ? 'Som Ligado' : 'Som Desligado'}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => updateOrderNotif({ enabled: !orderNotifCfg.enabled })}
+                        className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-colors cursor-pointer ${
+                          orderNotifCfg.enabled
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-[#F5F4F0] text-[#555552] hover:text-[#1C1C1E]'
+                        }`}
+                      >
+                        {orderNotifCfg.enabled ? 'Email Ligado' : 'Email Desligado'}
+                      </button>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-                    <div className="md:col-span-6">
+                    <div className="md:col-span-5">
                       <label className="block text-xs font-medium text-[#555552] mb-1">
                         Email que Recebe as Notificações de Pedido
                       </label>
@@ -2243,24 +2366,35 @@ export const AdminSettings: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="md:col-span-3">
+                    <div className="md:col-span-2">
+                      <button
+                        type="button"
+                        onClick={() => void playOrderNotificationSound()}
+                        className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-[#F5F4F0] hover:bg-[#EAE8E1] text-[#1C1C1E] text-xs font-medium cursor-pointer"
+                      >
+                        <Volume2 className="w-3.5 h-3.5" />
+                        <span>Testar Som</span>
+                      </button>
+                    </div>
+
+                    <div className="md:col-span-2">
                       <button
                         type="button"
                         disabled={testingEmail}
                         onClick={handleSendTestEmail}
-                        className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#1C1C1E] text-white text-xs font-medium hover:bg-[#323235] disabled:opacity-60 cursor-pointer"
+                        className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-[#1C1C1E] text-white text-xs font-medium hover:bg-[#323235] disabled:opacity-60 cursor-pointer"
                       >
                         <Send className="w-3.5 h-3.5" />
-                        <span>{testingEmail ? 'A enviar teste...' : 'Testar Notificação'}</span>
+                        <span>{testingEmail ? 'A enviar...' : 'Testar Email'}</span>
                       </button>
                     </div>
                   </div>
 
-                  {!emailTransportInfo?.configured && (
-                    <p className="text-[11px] text-[#72726E] bg-[#F5F4F0] rounded-xl px-3.5 py-2.5">
-                      Para entregar automaticamente na caixa de entrada do Gmail, defina <span className="font-mono font-semibold text-[#1C1C1E]">SMTP_USER</span> e <span className="font-mono font-semibold text-[#1C1C1E]">SMTP_PASS</span> (Senha de Aplicação Gmail) ou <span className="font-mono font-semibold text-[#1C1C1E]">RESEND_API_KEY</span> nas Secrets do projeto.
-                    </p>
-                  )}
+                  <p className="text-[11px] text-[#72726E] bg-[#F5F4F0] rounded-xl px-3.5 py-2.5">
+                    {!emailTransportInfo?.configured
+                      ? 'Para entregar automaticamente na caixa Gmail, adicione SMTP_USER e SMTP_PASS (Senha de Aplicação Gmail) ou RESEND_API_KEY nas Secrets do servidor. O som de chegada de email no telemóvel/PC é controlado pela app Gmail (toque/notificações).'
+                      : 'Os emails são enviados com prioridade alta para o Gmail. O som do email ao cair na caixa de entrada depende das definições de som de notificação da sua aplicação Gmail; com este painel aberto também tocará um alerta sonoro imediato.'}
+                  </p>
 
                   {testEmailFeedback && (
                     <div

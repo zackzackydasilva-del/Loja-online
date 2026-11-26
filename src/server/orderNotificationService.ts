@@ -86,11 +86,31 @@ function buildEmailBodies(
   order: StoreOrder,
   detailedItems: OrderNotificationItemDetail[]
 ): { text: string; html: string } {
+  const itemsSubtotal =
+    typeof order.subtotal === 'number'
+      ? order.subtotal
+      : order.items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
+  const discountAmount =
+    typeof order.discountAmount === 'number'
+      ? order.discountAmount
+      : Math.max(0, itemsSubtotal - order.total);
+  const shippingFee =
+    typeof order.shippingFee === 'number'
+      ? order.shippingFee
+      : Math.max(0, order.total - (itemsSubtotal - discountAmount));
+
   const textLines: string[] = [
     title,
     `Loja: ${storeName}`,
     `Encomenda: #${order.id}`,
     `Data: ${new Date().toLocaleString('pt-PT')}`,
+    `Subtotal: ${formatMoney(itemsSubtotal, currencySymbol)}`,
+    ...(discountAmount > 0
+      ? [
+          `Desconto${order.promoCode ? ` (${order.promoCode})` : ''}: -${formatMoney(discountAmount, currencySymbol)}`,
+        ]
+      : []),
+    `Taxa de Entrega: ${shippingFee > 0 ? formatMoney(shippingFee, currencySymbol) : 'Grátis'}`,
     `Total: ${formatMoney(order.total, currencySymbol)}`,
     `Pagamento: ${order.paymentMethod}`,
     '',
@@ -167,6 +187,15 @@ function buildEmailBodies(
         <div style="padding:22px 24px;">
           <div style="background:#f5f4f0;border-radius:14px;padding:14px 16px;margin-bottom:18px;font-size:13px;line-height:1.6;">
             <div><strong>Encomenda:</strong> #${escapeHtml(order.id)}</div>
+            <div><strong>Subtotal:</strong> ${escapeHtml(formatMoney(itemsSubtotal, currencySymbol))}</div>
+            ${
+              discountAmount > 0
+                ? `<div><strong>Desconto${order.promoCode ? ` (${escapeHtml(order.promoCode)})` : ''}:</strong> -${escapeHtml(formatMoney(discountAmount, currencySymbol))}</div>`
+                : ''
+            }
+            <div><strong>Taxa de Entrega:</strong> ${
+              shippingFee > 0 ? escapeHtml(formatMoney(shippingFee, currencySymbol)) : 'Grátis'
+            }</div>
             <div><strong>Total:</strong> ${escapeHtml(formatMoney(order.total, currencySymbol))} (${escapeHtml(order.paymentMethod)})</div>
             <div><strong>Cliente:</strong> ${escapeHtml(order.customerName)} · ${escapeHtml(order.customerPhone)}</div>
             <div><strong>Email do cliente:</strong> ${escapeHtml(order.customerEmail)}</div>
@@ -213,6 +242,11 @@ async function deliverEmailViaProvider(params: {
           subject: params.subject,
           text: params.text,
           html: params.html,
+          headers: {
+            'X-Priority': '1',
+            'X-MSMail-Priority': 'High',
+            Importance: 'High',
+          },
         }),
       });
       if (!response.ok) {
@@ -262,6 +296,13 @@ async function deliverEmailViaProvider(params: {
         subject: params.subject,
         text: params.text,
         html: params.html,
+        priority: 'high',
+        headers: {
+          'X-Priority': '1 (Highest)',
+          'X-MSMail-Priority': 'High',
+          Importance: 'High',
+          Priority: 'urgent',
+        },
       });
 
       return { status: 'sent', provider: 'smtp' };
@@ -354,6 +395,9 @@ export async function notifyNewOrderAsync(
     shippingAddress: order.shippingAddress,
     city: order.city,
     paymentMethod: order.paymentMethod,
+    discountAmount: order.discountAmount,
+    shippingFee: order.shippingFee,
+    promoCode: order.promoCode,
     total: order.total,
     currencySymbol: ctx.currencySymbol,
     items: detailedItems,

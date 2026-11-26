@@ -34,7 +34,14 @@ export function downloadOrderInvoicePdf(params: {
     (sum, item) => sum + item.unitPrice * item.quantity,
     0
   );
-  const discountValue = Math.max(0, itemsSubtotal - order.total);
+  const discountValue =
+    typeof order.discountAmount === 'number'
+      ? order.discountAmount
+      : Math.max(0, itemsSubtotal - order.total);
+  const shippingValue =
+    typeof order.shippingFee === 'number'
+      ? order.shippingFee
+      : Math.max(0, order.total - (itemsSubtotal - discountValue));
   const paidAmount = isPaid ? order.total : 0;
   const dueAmount = isPaid ? 0 : order.total;
 
@@ -287,7 +294,7 @@ export function downloadOrderInvoicePdf(params: {
 
   const sumW = 76;
   const sumX = pageWidth - margin - sumW;
-  const sumRows = 3 + (discountValue > 0 ? 1 : 0) + (dueAmount > 0 ? 1 : 0);
+  const sumRows = 4 + (discountValue > 0 ? 1 : 0) + (dueAmount > 0 ? 1 : 0);
   const sumH = sumRows * 6.5 + 10;
 
   doc.setFillColor(246, 246, 244);
@@ -305,7 +312,11 @@ export function downloadOrderInvoicePdf(params: {
 
   if (discountValue > 0) {
     doc.setTextColor(4, 120, 87);
-    doc.text('Desconto Aplicado', sumX + 4, sy);
+    doc.text(
+      safePdfText(order.promoCode ? `Desconto (${order.promoCode})` : 'Desconto Aplicado'),
+      sumX + 4,
+      sy
+    );
     doc.text(
       safePdfText(`-${formatMoney(discountValue, settings.currencySymbol)}`),
       sumX + sumW - 4,
@@ -314,6 +325,16 @@ export function downloadOrderInvoicePdf(params: {
     );
     sy += 6;
   }
+
+  doc.setTextColor(85, 85, 82);
+  doc.text('Taxa de Entrega', sumX + 4, sy);
+  doc.text(
+    safePdfText(shippingValue > 0 ? formatMoney(shippingValue, settings.currencySymbol) : 'Gratis'),
+    sumX + sumW - 4,
+    sy,
+    { align: 'right' }
+  );
+  sy += 6;
 
   doc.setDrawColor(218, 218, 214);
   doc.line(sumX + 4, sy - 2, sumX + sumW - 4, sy - 2);

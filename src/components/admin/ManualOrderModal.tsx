@@ -43,9 +43,16 @@ export const ManualOrderModal: React.FC<ManualOrderModalProps> = ({
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Multicaixa Express');
   const [status, setStatus] = useState<OrderStatus>('Pendente');
   const [discountApplied, setDiscountApplied] = useState(false);
+  const [includeShipping, setIncludeShipping] = useState(false);
   const [lines, setLines] = useState<OrderLineDraft[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+
+  const promoPercent = Math.max(
+    0,
+    Math.min(100, Number(settings.storefrontConfig?.promoDiscountPercent ?? 10) || 0)
+  );
+  const baseShippingFee = Math.max(0, Number(settings.storefrontConfig?.shippingFee ?? 0) || 0);
 
   const availableProducts = useMemo(() => products, [products]);
 
@@ -86,6 +93,7 @@ export const ManualOrderModal: React.FC<ManualOrderModalProps> = ({
     setPaymentMethod('Multicaixa Express');
     setStatus('Pendente');
     setDiscountApplied(false);
+    setIncludeShipping(false);
     setLines([buildDefaultLine()]);
   }, [isOpen]);
 
@@ -113,7 +121,15 @@ export const ManualOrderModal: React.FC<ManualOrderModalProps> = ({
     }, 0);
   }, [lines]);
 
-  const finalTotal = discountApplied ? subtotal * 0.9 : subtotal;
+  const discountAmount =
+    discountApplied && promoPercent > 0 ? +((subtotal * promoPercent) / 100).toFixed(2) : 0;
+  const qualifiesFreeShipping =
+    settings.freeShippingThreshold > 0 && subtotal >= settings.freeShippingThreshold;
+  const appliedShippingFee =
+    includeShipping && baseShippingFee > 0 && !qualifiesFreeShipping
+      ? +baseShippingFee.toFixed(2)
+      : 0;
+  const finalTotal = +(Math.max(0, subtotal - discountAmount) + appliedShippingFee).toFixed(2);
 
   if (!isOpen) return null;
 
@@ -141,6 +157,7 @@ export const ManualOrderModal: React.FC<ManualOrderModalProps> = ({
         paymentMethod,
         status,
         discountApplied,
+        includeShipping,
         items: lines.map((line) =>
           line.mode === 'catalog'
             ? {
@@ -555,15 +572,33 @@ export const ManualOrderModal: React.FC<ManualOrderModalProps> = ({
             </select>
           </div>
 
-          <label className="sm:col-span-2 inline-flex items-center gap-2 text-xs text-[#1C1C1E] cursor-pointer">
-            <input
-              type="checkbox"
-              checked={discountApplied}
-              onChange={(e) => setDiscountApplied(e.target.checked)}
-              className="rounded"
-            />
-            <span>Aplicar desconto de 10% nesta encomenda</span>
-          </label>
+          <div className="sm:col-span-2 flex flex-wrap gap-4">
+            <label className="inline-flex items-center gap-2 text-xs text-[#1C1C1E] cursor-pointer">
+              <input
+                type="checkbox"
+                checked={discountApplied}
+                onChange={(e) => setDiscountApplied(e.target.checked)}
+                className="rounded"
+              />
+              <span>Aplicar desconto do cupão ({promoPercent}%) nesta encomenda</span>
+            </label>
+
+            {baseShippingFee > 0 && (
+              <label className="inline-flex items-center gap-2 text-xs text-[#1C1C1E] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={includeShipping}
+                  onChange={(e) => setIncludeShipping(e.target.checked)}
+                  className="rounded"
+                />
+                <span>
+                  {qualifiesFreeShipping
+                    ? 'Taxa de entrega (Grátis pelo limiar)'
+                    : `Adicionar taxa de entrega (${formatMoney(baseShippingFee, settings.currencySymbol)})`}
+                </span>
+              </label>
+            )}
+          </div>
 
           <div className="sm:col-span-2 pt-2 border-t border-black/8 flex items-center justify-between">
             <span className="text-xs font-medium text-[#555552]">

@@ -97,6 +97,7 @@ interface CheckoutPayload {
   postalCode: string;
   paymentMethod: PaymentMethod;
   discountApplied: boolean;
+  promoCode?: string;
 }
 
 export interface ManualOrderLinePayload {
@@ -118,6 +119,7 @@ export interface ManualOrderPayload {
   status: OrderStatus;
   items: ManualOrderLinePayload[];
   discountApplied: boolean;
+  includeShipping?: boolean;
 }
 
 interface StoreContextValue {

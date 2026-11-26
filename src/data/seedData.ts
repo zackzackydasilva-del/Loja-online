@@ -163,6 +163,7 @@ export const DEFAULT_STOREFRONT_CONFIG: StorefrontConfig = {
   orderNotification: {
     enabled: true,
     recipientEmail: 'pintozacarias806@gmail.com',
+    soundEnabled: true,
   },
   saleWebhook: {
     enabled: false,
@@ -170,6 +171,8 @@ export const DEFAULT_STOREFRONT_CONFIG: StorefrontConfig = {
     secret: '',
     hasSecret: false,
   },
+  shippingFee: 0,
+  promoDiscountPercent: 10,
   catalogEyebrow: 'Catálogo',
   catalogTitle: 'As Nossas Escolhas Favoritas',
   guarantees: [

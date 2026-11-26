@@ -77,7 +77,13 @@ export const TrustAndNewsletter: React.FC = () => {
           {subscribed ? (
             <div className="inline-flex items-center gap-2 text-sm font-medium text-[#141413] bg-white px-4 py-3 rounded-lg border border-[#141413]/12 w-fit">
               <Check className="w-4 h-4 text-emerald-700" />
-              <span>Subscrição confirmada. Utilize o código {nl.promoCode || 'LUNORA10'} no checkout.</span>
+              <span>
+                Subscrição confirmada. Utilize o código {nl.promoCode || 'LUNORA10'}
+                {Number(cfg.promoDiscountPercent ?? 10) > 0
+                  ? ` (${Number(cfg.promoDiscountPercent ?? 10)}% de desconto)`
+                  : ''}{' '}
+                no checkout.
+              </span>
             </div>
           ) : (
             <form

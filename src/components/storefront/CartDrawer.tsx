@@ -65,6 +65,11 @@ export const CartDrawer: React.FC = () => {
   const postCheckoutTimerRef = useRef<number | null>(null);
 
   const activePromoCode = (settings.storefrontConfig.newsletter.promoCode || 'LUNORA10').trim().toUpperCase();
+  const promoDiscountPercent = Math.max(
+    0,
+    Math.min(100, Number(settings.storefrontConfig.promoDiscountPercent ?? 10) || 0)
+  );
+  const baseShippingFee = Math.max(0, Number(settings.storefrontConfig.shippingFee ?? 0) || 0);
 
   const cartLines = cart
     .map((item) => {
@@ -74,12 +79,23 @@ export const CartDrawer: React.FC = () => {
     .filter((x): x is NonNullable<typeof x> => x !== null);
 
   const subtotal = cartLines.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
-  const total = discountApplied ? subtotal * 0.9 : subtotal;
+  const discountAmount =
+    discountApplied && promoDiscountPercent > 0
+      ? +((subtotal * promoDiscountPercent) / 100).toFixed(2)
+      : 0;
+  const qualifiesFreeShipping =
+    settings.freeShippingThreshold > 0 && subtotal >= settings.freeShippingThreshold;
+  const appliedShippingFee =
+    baseShippingFee > 0 && !qualifiesFreeShipping ? +baseShippingFee.toFixed(2) : 0;
+  const total = +(Math.max(0, subtotal - discountAmount) + appliedShippingFee).toFixed(2);
   const freeShippingProgress =
     settings.freeShippingThreshold > 0
       ? Math.min(100, (subtotal / settings.freeShippingThreshold) * 100)
       : 100;
-  const remainingForFreeShipping = Math.max(0, settings.freeShippingThreshold - subtotal);
+  const remainingForFreeShipping =
+    settings.freeShippingThreshold > 0
+      ? Math.max(0, settings.freeShippingThreshold - subtotal)
+      : 0;
   const cartTotalUnits = cartLines.reduce((s, i) => s + i.quantity, 0);
   const cartItemsSummary = cartLines.map((i) => `${i.quantity}x ${i.product.name}`);
 
@@ -181,6 +197,7 @@ export const CartDrawer: React.FC = () => {
       postalCode: form.postalCode.trim(),
       paymentMethod: form.paymentMethod,
       discountApplied,
+      promoCode: discountApplied ? activePromoCode : '',
       itemsPayload,
     });
 
@@ -204,6 +221,7 @@ export const CartDrawer: React.FC = () => {
             paymentMethod: form.paymentMethod,
             items: itemsPayload,
             discountApplied,
+            promoCode: discountApplied ? activePromoCode : undefined,
             sessionId: getVisitorSessionId(),
           }),
         });
@@ -239,9 +257,18 @@ export const CartDrawer: React.FC = () => {
 
   const handleApplyPromo = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!activePromoCode) {
+      setDiscountApplied(false);
+      setPromoFeedback('Nenhum cupão promocional está ativo no momento.');
+      return;
+    }
     if (promoCode.trim().toUpperCase() === activePromoCode) {
       setDiscountApplied(true);
-      setPromoFeedback(`Código ${activePromoCode} aplicado (10% desconto).`);
+      setPromoFeedback(
+        promoDiscountPercent > 0
+          ? `Código ${activePromoCode} aplicado (${promoDiscountPercent}% desconto).`
+          : `Código ${activePromoCode} validado.`
+      );
     } else {
       setPromoFeedback(`Código inválido. Experimente ${activePromoCode}.`);
     }
@@ -256,6 +283,7 @@ export const CartDrawer: React.FC = () => {
         ...form,
         draftOrderId: draftOrderIdRef.current || undefined,
         discountApplied,
+        promoCode: discountApplied ? activePromoCode : undefined,
       });
       draftOrderIdRef.current = '';
       lastSavedPayloadRef.current = '';
@@ -363,6 +391,20 @@ export const CartDrawer: React.FC = () => {
                     {confirmedOrder.city}, {confirmedOrder.postalCode}
                   </span>
                 </div>
+                {typeof confirmedOrder.discountAmount === 'number' && confirmedOrder.discountAmount > 0 && (
+                  <div className="flex justify-between text-emerald-700 text-xs tabular-nums">
+                    <span>Desconto{confirmedOrder.promoCode ? ` (${confirmedOrder.promoCode})` : ''}</span>
+                    <span>-{formatMoney(confirmedOrder.discountAmount, settings.currencySymbol)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-xs tabular-nums">
+                  <span className="text-[#66635C]">Taxa de Entrega</span>
+                  <span className="font-medium text-[#141413]">
+                    {typeof confirmedOrder.shippingFee === 'number' && confirmedOrder.shippingFee > 0
+                      ? formatMoney(confirmedOrder.shippingFee, settings.currencySymbol)
+                      : 'Grátis'}
+                  </span>
+                </div>
                 <div className="pt-3 border-t border-[#141413]/10 flex justify-between font-semibold tabular-nums">
                   <span>Total Pago</span>
                   <span>{formatMoney(confirmedOrder.total, settings.currencySymbol)}</span>
@@ -396,19 +438,25 @@ export const CartDrawer: React.FC = () => {
             </div>
           ) : step === 'cart' ? (
             <div className="space-y-5">
-              {/* Free Shipping Progress */}
+              {/* Free Shipping / Delivery Fee Notice */}
               <div className="bg-white rounded-xl p-4 border border-[#141413]/8">
                 <p className="text-xs text-[#524F49] mb-2">
-                  {remainingForFreeShipping === 0
-                    ? 'Tem direito a Envio Gratuito nesta encomenda.'
-                    : `Faltam ${formatMoney(remainingForFreeShipping, settings.currencySymbol)} para Envio Gratuito.`}
+                  {settings.freeShippingThreshold > 0
+                    ? remainingForFreeShipping === 0
+                      ? 'Tem direito a Envio Gratuito nesta encomenda.'
+                      : `Faltam ${formatMoney(remainingForFreeShipping, settings.currencySymbol)} para Envio Gratuito.`
+                    : baseShippingFee > 0
+                    ? `Taxa de entrega fixa: ${formatMoney(baseShippingFee, settings.currencySymbol)}.`
+                    : 'Envio gratuito ativo para esta encomenda.'}
                 </p>
-                <div className="w-full h-1.5 bg-[#EFECE5] rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-[#141413] transition-all duration-300"
-                    style={{ width: `${freeShippingProgress}%` }}
-                  />
-                </div>
+                {settings.freeShippingThreshold > 0 && (
+                  <div className="w-full h-1.5 bg-[#EFECE5] rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-[#141413] transition-all duration-300"
+                      style={{ width: `${freeShippingProgress}%` }}
+                    />
+                  </div>
+                )}
               </div>
 
               {/* Cart Items */}
@@ -630,12 +678,22 @@ export const CartDrawer: React.FC = () => {
                 <span>Subtotal</span>
                 <span>{formatMoney(subtotal, settings.currencySymbol)}</span>
               </div>
-              {discountApplied && (
+              {discountAmount > 0 && (
                 <div className="flex justify-between text-emerald-700 text-xs tabular-nums">
-                  <span>Desconto ({activePromoCode})</span>
-                  <span>-{formatMoney(subtotal * 0.1, settings.currencySymbol)}</span>
+                  <span>
+                    Desconto ({activePromoCode} · {promoDiscountPercent}%)
+                  </span>
+                  <span>-{formatMoney(discountAmount, settings.currencySymbol)}</span>
                 </div>
               )}
+              <div className="flex justify-between text-[#66635C] text-xs tabular-nums">
+                <span>Taxa de Entrega</span>
+                <span>
+                  {appliedShippingFee > 0
+                    ? formatMoney(appliedShippingFee, settings.currencySymbol)
+                    : 'Grátis'}
+                </span>
+              </div>
               <div className="flex justify-between font-semibold text-[#141413] pt-1.5 border-t border-[#141413]/8 tabular-nums">
                 <span>Total</span>
                 <span>{formatMoney(total, settings.currencySymbol)}</span>

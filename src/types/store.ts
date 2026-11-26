@@ -87,6 +87,10 @@ export interface StoreOrder {
   postalCode: string;
   paymentMethod: PaymentMethod;
   items: OrderItemSummary[];
+  subtotal?: number;
+  discountAmount?: number;
+  shippingFee?: number;
+  promoCode?: string;
   total: number;
   status: OrderStatus;
   createdAt: string;
@@ -209,6 +213,7 @@ export interface StorePopupConfig {
 export interface OrderEmailNotificationConfig {
   enabled: boolean;
   recipientEmail: string;
+  soundEnabled?: boolean;
 }
 
 export interface SaleWebhookConfig {
@@ -258,6 +263,9 @@ export interface OrderNotificationRecord {
   shippingAddress: string;
   city: string;
   paymentMethod: PaymentMethod;
+  discountAmount?: number;
+  shippingFee?: number;
+  promoCode?: string;
   total: number;
   currencySymbol: string;
   items: OrderNotificationItemDetail[];
@@ -297,6 +305,8 @@ export interface StorefrontConfig {
   postCheckoutPopup?: StorePopupConfig;
   orderNotification?: OrderEmailNotificationConfig;
   saleWebhook?: SaleWebhookConfig;
+  shippingFee?: number;
+  promoDiscountPercent?: number;
   catalogEyebrow: string;
   catalogTitle: string;
   guarantees: TrustBadgeConfig[];

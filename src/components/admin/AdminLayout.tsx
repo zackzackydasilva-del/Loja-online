@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   BarChart3,
@@ -18,6 +18,7 @@ import {
   Store,
   Truck,
   Users,
+  Volume2,
   Webhook,
   X,
 } from 'lucide-react';
@@ -25,6 +26,10 @@ import { ASSETS } from '../../data/seedData';
 import { useStore } from '../../context/StoreContext';
 import { OrderNotificationRecord, SaleWebhookDeliveryRecord } from '../../types/store';
 import { formatMoney } from '../../utils/currency';
+import {
+  attachNotificationAudioUnlock,
+  playOrderNotificationSound,
+} from '../../utils/notificationSound';
 import { SafeImage } from '../SafeImage';
 
 export type AdminTab =
@@ -76,6 +81,16 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
   const [newChannelName, setNewChannelName] = useState('');
   const [newChannelRole, setNewChannelRole] = useState('');
 
+  const soundEnabledRef = useRef<boolean>(
+    settings.storefrontConfig?.orderNotification?.soundEnabled !== false
+  );
+  soundEnabledRef.current =
+    settings.storefrontConfig?.orderNotification?.soundEnabled !== false;
+
+  useEffect(() => {
+    return attachNotificationAudioUnlock();
+  }, []);
+
   useEffect(() => {
     if (!adminToken) return;
     let active = true;
@@ -117,6 +132,9 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
             ...prev.filter((n) => n.id !== notif.id),
           ].slice(0, 50));
           setLiveToastNotification(notif);
+          if (soundEnabledRef.current) {
+            void playOrderNotificationSound();
+          }
         } else if (parsed.type === 'sale:webhook' && parsed.payload) {
           const wh = parsed.payload as SaleWebhookDeliveryRecord;
           setWebhookDeliveries((prev) => [
@@ -456,17 +474,28 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
               {/* Notifications Popover */}
               {notificationsOpen && (
                 <div className="absolute right-0 top-12 z-30 w-96 max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-xl border border-black/8 p-4 space-y-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2">
                     <span className="text-xs font-semibold text-[#1C1C1E]">
                       Notificações & Alertas
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => setNotificationsOpen(false)}
-                      className="text-xs text-[#72726E] hover:text-[#1C1C1E] cursor-pointer"
-                    >
-                      Fechar
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void playOrderNotificationSound()}
+                        className="inline-flex items-center gap-1 text-[11px] font-medium text-[#555552] hover:text-[#1C1C1E] cursor-pointer"
+                        title="Testar som de alerta de encomenda"
+                      >
+                        <Volume2 className="w-3.5 h-3.5" />
+                        <span>Som</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setNotificationsOpen(false)}
+                        className="text-xs text-[#72726E] hover:text-[#1C1C1E] cursor-pointer"
+                      >
+                        Fechar
+                      </button>
+                    </div>
                   </div>
                   {orderNotifications.length === 0 &&
                   webhookDeliveries.length === 0 &&

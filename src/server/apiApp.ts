@@ -253,6 +253,7 @@ app.post('/api/orders/draft', async (req, res) => {
       paymentMethod,
       items: body.items,
       discountApplied: Boolean(body.discountApplied),
+      promoCode: typeof body.promoCode === 'string' ? body.promoCode.trim().slice(0, 40) : undefined,
       strictStock: false,
     });
 
@@ -300,6 +301,7 @@ app.post('/api/orders', async (req, res) => {
       paymentMethod,
       items: body.items,
       discountApplied: Boolean(body.discountApplied),
+      promoCode: typeof body.promoCode === 'string' ? body.promoCode.trim().slice(0, 40) : undefined,
     });
 
     await recordOrderCompletionAnalyticsAsync(
@@ -616,6 +618,7 @@ app.post('/api/admin/orders', requireAdminAuth, async (req, res) => {
       status,
       items: body.items,
       discountApplied: Boolean(body.discountApplied),
+      includeShipping: Boolean(body.includeShipping),
     });
 
     if (order.status === 'Entregue') {
@@ -1046,11 +1049,26 @@ app.patch('/api/admin/settings', requireAdminAuth, async (req, res) => {
             : '';
         cfg.orderNotification = {
           enabled: Boolean(cfg.orderNotification.enabled),
+          soundEnabled: cfg.orderNotification.soundEnabled !== false,
           recipientEmail:
             rawEmail && isValidEmailAddress(rawEmail)
               ? rawEmail
               : 'pintozacarias806@gmail.com',
         };
+      }
+      if (cfg.shippingFee !== undefined) {
+        const feeNum = Number(cfg.shippingFee);
+        cfg.shippingFee =
+          Number.isFinite(feeNum) && feeNum >= 0
+            ? Math.min(10_000_000, +feeNum.toFixed(2))
+            : 0;
+      }
+      if (cfg.promoDiscountPercent !== undefined) {
+        const pctNum = Number(cfg.promoDiscountPercent);
+        cfg.promoDiscountPercent =
+          Number.isFinite(pctNum) && pctNum >= 0
+            ? Math.min(100, +pctNum.toFixed(2))
+            : 0;
       }
       if (cfg.saleWebhook !== undefined && cfg.saleWebhook && typeof cfg.saleWebhook === 'object') {
         const rawUrl =
@@ -1072,12 +1090,15 @@ app.patch('/api/admin/settings', requireAdminAuth, async (req, res) => {
         };
       }
 
-      if (cfg.newsletter?.image !== undefined) {
-        const nlImg = String(cfg.newsletter.image).trim();
-        if (!nlImg) {
-          cfg.newsletter.image = '';
-        } else if (!isSafeAssetUrl(nlImg)) {
-          cfg.newsletter.image = '';
+      if (cfg.newsletter && typeof cfg.newsletter === 'object') {
+        if (typeof cfg.newsletter.promoCode === 'string') {
+          cfg.newsletter.promoCode = cfg.newsletter.promoCode.trim().toUpperCase().slice(0, 40);
+        }
+        if (cfg.newsletter.image !== undefined) {
+          const nlImg = String(cfg.newsletter.image).trim();
+          if (!nlImg || !isSafeAssetUrl(nlImg)) {
+            cfg.newsletter.image = '';
+          }
         }
       }
       updates.storefrontConfig = cfg;

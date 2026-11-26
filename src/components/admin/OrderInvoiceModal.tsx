@@ -33,7 +33,14 @@ export const OrderInvoiceModal: React.FC<OrderInvoiceModalProps> = ({
     (sum, item) => sum + item.unitPrice * item.quantity,
     0
   );
-  const discountValue = Math.max(0, itemsSubtotal - order.total);
+  const discountValue =
+    typeof order.discountAmount === 'number'
+      ? order.discountAmount
+      : Math.max(0, itemsSubtotal - order.total);
+  const shippingValue =
+    typeof order.shippingFee === 'number'
+      ? order.shippingFee
+      : Math.max(0, order.total - (itemsSubtotal - discountValue));
   const paidAmount = isPaid ? order.total : 0;
   const dueAmount = isPaid ? 0 : order.total;
 
@@ -284,12 +291,21 @@ export const OrderInvoiceModal: React.FC<OrderInvoiceModalProps> = ({
 
               {discountValue > 0 && (
                 <div className="flex justify-between text-emerald-700">
-                  <span>Desconto Aplicado</span>
+                  <span>
+                    Desconto{order.promoCode ? ` (${order.promoCode})` : ' Aplicado'}
+                  </span>
                   <span className="font-mono tabular-nums whitespace-nowrap">
                     −{formatMoney(discountValue, settings.currencySymbol)}
                   </span>
                 </div>
               )}
+
+              <div className="flex justify-between text-[#555552]">
+                <span>Taxa de Entrega</span>
+                <span className="font-mono tabular-nums whitespace-nowrap">
+                  {shippingValue > 0 ? formatMoney(shippingValue, settings.currencySymbol) : 'Grátis'}
+                </span>
+              </div>
 
               <div className="pt-2 border-t border-black/10 flex justify-between items-center text-sm font-semibold text-[#1C1C1E]">
                 <span>Total da Factura</span>

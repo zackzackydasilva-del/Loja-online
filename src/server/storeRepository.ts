@@ -141,11 +141,24 @@ function mergeStorefrontConfig(raw: unknown): StorefrontConfig {
     orderNotification: {
       ...DEFAULT_STOREFRONT_CONFIG.orderNotification!,
       ...(obj.orderNotification || {}),
+      soundEnabled: obj.orderNotification?.soundEnabled !== false,
     },
     saleWebhook: {
       ...DEFAULT_STOREFRONT_CONFIG.saleWebhook!,
       ...(obj.saleWebhook || {}),
     },
+    shippingFee:
+      typeof obj.shippingFee === 'number' && Number.isFinite(obj.shippingFee) && obj.shippingFee >= 0
+        ? +obj.shippingFee.toFixed(2)
+        : Number.isFinite(Number(obj.shippingFee)) && Number(obj.shippingFee) >= 0
+        ? +Number(obj.shippingFee).toFixed(2)
+        : DEFAULT_STOREFRONT_CONFIG.shippingFee ?? 0,
+    promoDiscountPercent:
+      typeof obj.promoDiscountPercent === 'number' && Number.isFinite(obj.promoDiscountPercent)
+        ? Math.max(0, Math.min(100, +obj.promoDiscountPercent.toFixed(2)))
+        : obj.promoDiscountPercent !== undefined && Number.isFinite(Number(obj.promoDiscountPercent))
+        ? Math.max(0, Math.min(100, +Number(obj.promoDiscountPercent).toFixed(2)))
+        : DEFAULT_STOREFRONT_CONFIG.promoDiscountPercent ?? 10,
     guarantees:
       Array.isArray(obj.guarantees) && obj.guarantees.length > 0
         ? obj.guarantees
@@ -240,6 +253,14 @@ const STORE_COSTS_META_ID = '__lunora_store_costs__';
 const STORE_ANALYTICS_META_ID = '__lunora_analytics_events__';
 const STORE_ORDER_NOTIFICATIONS_META_ID = '__lunora_order_notifications__';
 const STORE_WEBHOOK_LOGS_META_ID = '__lunora_sale_webhooks__';
+const STORE_ORDER_PRICING_META_ID = '__lunora_order_pricing__';
+
+interface OrderPricingMeta {
+  subtotal: number;
+  discountAmount: number;
+  shippingFee: number;
+  promoCode?: string;
+}
 
 function isMetaIntegrationId(id: unknown): boolean {
   return (
@@ -247,7 +268,8 @@ function isMetaIntegrationId(id: unknown): boolean {
     id === STORE_COSTS_META_ID ||
     id === STORE_ANALYTICS_META_ID ||
     id === STORE_ORDER_NOTIFICATIONS_META_ID ||
-    id === STORE_WEBHOOK_LOGS_META_ID
+    id === STORE_WEBHOOK_LOGS_META_ID ||
+    id === STORE_ORDER_PRICING_META_ID
   );
 }
 
@@ -352,6 +374,24 @@ function normalizeEmbeddedWebhookDelivery(item: unknown): SaleWebhookDeliveryRec
   };
 }
 
+function normalizeOrderPricingMap(raw: unknown): Record<string, OrderPricingMeta> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const result: Record<string, OrderPricingMeta> = {};
+  for (const [orderId, val] of Object.entries(raw as Record<string, unknown>)) {
+    if (!orderId || !val || typeof val !== 'object') continue;
+    const rec = val as Record<string, unknown>;
+    result[orderId] = {
+      subtotal: Math.max(0, Number(rec.subtotal) || 0),
+      discountAmount: Math.max(0, Number(rec.discountAmount) || 0),
+      shippingFee: Math.max(0, Number(rec.shippingFee) || 0),
+      ...(typeof rec.promoCode === 'string' && rec.promoCode.trim()
+        ? { promoCode: rec.promoCode.trim().slice(0, 40) }
+        : {}),
+    };
+  }
+  return result;
+}
+
 function extractIntegrationsAndConfig(rawIntegrations: unknown): {
   integrations: StoreSettings['integrations'];
   embeddedConfig: Partial<StorefrontConfig> | null;
@@ -359,6 +399,7 @@ function extractIntegrationsAndConfig(rawIntegrations: unknown): {
   embeddedEvents: StoreAnalyticsEvent[];
   embeddedNotifications: OrderNotificationRecord[];
   embeddedWebhooks: SaleWebhookDeliveryRecord[];
+  embeddedOrderPricing: Record<string, OrderPricingMeta>;
 } {
   if (!Array.isArray(rawIntegrations)) {
     return {
@@ -368,6 +409,7 @@ function extractIntegrationsAndConfig(rawIntegrations: unknown): {
       embeddedEvents: [],
       embeddedNotifications: [],
       embeddedWebhooks: [],
+      embeddedOrderPricing: {},
     };
   }
   const integrations: StoreSettings['integrations'] = [];
@@ -376,6 +418,7 @@ function extractIntegrationsAndConfig(rawIntegrations: unknown): {
   let embeddedEvents: StoreAnalyticsEvent[] = [];
   let embeddedNotifications: OrderNotificationRecord[] = [];
   let embeddedWebhooks: SaleWebhookDeliveryRecord[] = [];
+  let embeddedOrderPricing: Record<string, OrderPricingMeta> = {};
   for (const item of rawIntegrations) {
     if (item && typeof item === 'object') {
       const rec = item as Record<string, unknown>;
@@ -417,6 +460,10 @@ function extractIntegrationsAndConfig(rawIntegrations: unknown): {
         }
         continue;
       }
+      if (rec.id === STORE_ORDER_PRICING_META_ID) {
+        embeddedOrderPricing = normalizeOrderPricingMap(rec.pricing);
+        continue;
+      }
       integrations.push(item as StoreSettings['integrations'][number]);
     }
   }
@@ -427,6 +474,7 @@ function extractIntegrationsAndConfig(rawIntegrations: unknown): {
     embeddedEvents,
     embeddedNotifications,
     embeddedWebhooks,
+    embeddedOrderPricing,
   };
 }
 
@@ -436,7 +484,8 @@ function packIntegrationsWithConfig(
   costs: StoreCost[] = [],
   events: StoreAnalyticsEvent[] = [],
   notifications: OrderNotificationRecord[] = [],
-  webhooks: SaleWebhookDeliveryRecord[] = []
+  webhooks: SaleWebhookDeliveryRecord[] = [],
+  orderPricing: Record<string, OrderPricingMeta> = {}
 ): unknown[] {
   const clean = visibleIntegrations.filter((i) => i && !isMetaIntegrationId(i.id));
   const packed: unknown[] = [...clean];
@@ -483,6 +532,16 @@ function packIntegrationsWithConfig(
       role: 'system',
       connected: false,
       webhooks: webhooks.slice(0, 100),
+    });
+  }
+  const pricingEntries = Object.entries(orderPricing).slice(-300);
+  if (pricingEntries.length > 0) {
+    packed.push({
+      id: STORE_ORDER_PRICING_META_ID,
+      name: 'order_pricing',
+      role: 'system',
+      connected: false,
+      pricing: Object.fromEntries(pricingEntries),
     });
   }
   return packed;
@@ -541,6 +600,7 @@ interface MemoryStore {
   analyticsEvents: StoreAnalyticsEvent[];
   orderNotifications: OrderNotificationRecord[];
   saleWebhooks: SaleWebhookDeliveryRecord[];
+  orderPricing: Record<string, OrderPricingMeta>;
 }
 
 const memoryStore: MemoryStore = {
@@ -560,6 +620,7 @@ const memoryStore: MemoryStore = {
   analyticsEvents: [],
   orderNotifications: [],
   saleWebhooks: [],
+  orderPricing: {},
 };
 
 let cachedClient: SupabaseClient | null = null;
@@ -939,9 +1000,13 @@ function mapProductToRow(p: Product) {
 
 function mapOrderFromRow(
   row: Record<string, unknown>,
-  relationalItems?: OrderItemSummary[]
+  relationalItems?: OrderItemSummary[],
+  pricingMeta?: OrderPricingMeta
 ): StoreOrder {
   const fallbackItems = Array.isArray(row.items) ? (row.items as OrderItemSummary[]) : [];
+  const items = relationalItems && relationalItems.length > 0 ? relationalItems : fallbackItems;
+  const itemsSubtotal = items.reduce((s, item) => s + item.unitPrice * item.quantity, 0);
+  const total = Number(row.total);
   return {
     id: String(row.id),
     customerId: row.customer_id ? String(row.customer_id) : undefined,
@@ -952,13 +1017,111 @@ function mapOrderFromRow(
     city: String(row.city),
     postalCode: String(row.postal_code),
     paymentMethod: String(row.payment_method) as StoreOrder['paymentMethod'],
-    items: relationalItems && relationalItems.length > 0 ? relationalItems : fallbackItems,
-    total: Number(row.total),
+    items,
+    subtotal: pricingMeta?.subtotal ?? itemsSubtotal,
+    discountAmount: pricingMeta?.discountAmount,
+    shippingFee: pricingMeta?.shippingFee,
+    promoCode: pricingMeta?.promoCode,
+    total,
     status: String(row.status) as OrderStatus,
     createdAt: String(row.created_at),
     progressStep: Number(row.progress_step ?? 1),
     totalSteps: Number(row.total_steps ?? 3),
   };
+}
+
+function calculateAuthoritativeOrderTotals(params: {
+  subtotal: number;
+  discountApplied: boolean;
+  promoCodeInput?: string;
+  settings: Pick<PublicStorePayload['settings'], 'freeShippingThreshold' | 'storefrontConfig'>;
+  includeShipping: boolean;
+}): {
+  subtotal: number;
+  discountAmount: number;
+  shippingFee: number;
+  total: number;
+  promoCode?: string;
+} {
+  const subtotal = +Math.max(0, params.subtotal).toFixed(2);
+  const configuredPromoCode = (
+    params.settings.storefrontConfig.newsletter?.promoCode || 'LUNORA10'
+  )
+    .trim()
+    .toUpperCase();
+  const discountPct = Math.max(
+    0,
+    Math.min(100, Number(params.settings.storefrontConfig.promoDiscountPercent ?? 10) || 0)
+  );
+  const incomingCode = (params.promoCodeInput || '').trim().toUpperCase();
+  const promoValid =
+    params.discountApplied &&
+    (!incomingCode || !configuredPromoCode || incomingCode === configuredPromoCode);
+
+  const discountAmount = promoValid ? +(subtotal * (discountPct / 100)).toFixed(2) : 0;
+  const baseShippingFee = Math.max(
+    0,
+    Number(params.settings.storefrontConfig.shippingFee ?? 0) || 0
+  );
+  const freeThreshold = Math.max(0, Number(params.settings.freeShippingThreshold ?? 0) || 0);
+  const qualifiesFree = freeThreshold > 0 && subtotal >= freeThreshold;
+  const shippingFee =
+    params.includeShipping && baseShippingFee > 0 && !qualifiesFree
+      ? +baseShippingFee.toFixed(2)
+      : 0;
+  const total = +(Math.max(0, subtotal - discountAmount) + shippingFee).toFixed(2);
+
+  return {
+    subtotal,
+    discountAmount,
+    shippingFee,
+    total,
+    promoCode: promoValid ? configuredPromoCode : undefined,
+  };
+}
+
+async function persistOrderPricingMeta(orderId: string, meta: OrderPricingMeta): Promise<void> {
+  memoryStore.orderPricing = {
+    ...memoryStore.orderPricing,
+    [orderId]: meta,
+  };
+  const supabase = getSupabaseClient();
+  if (!supabase) return;
+  try {
+    const { data: currentRowData } = await supabase
+      .from('store_settings')
+      .select('integrations')
+      .eq('id', 1)
+      .maybeSingle();
+    const currentRow = currentRowData as Record<string, unknown> | null;
+    const {
+      integrations: currentIntegrations,
+      embeddedConfig: currentEmbeddedConfig,
+      embeddedCosts,
+      embeddedEvents,
+      embeddedNotifications,
+      embeddedWebhooks,
+      embeddedOrderPricing,
+    } = extractIntegrationsAndConfig(currentRow?.integrations);
+
+    const nextPricing: Record<string, OrderPricingMeta> = {
+      ...embeddedOrderPricing,
+      [orderId]: meta,
+    };
+
+    const nextIntegrations = packIntegrationsWithConfig(
+      currentIntegrations,
+      currentEmbeddedConfig ? mergeStorefrontConfig(currentEmbeddedConfig) : null,
+      embeddedCosts,
+      embeddedEvents,
+      embeddedNotifications,
+      embeddedWebhooks,
+      nextPricing
+    );
+    await supabase.from('store_settings').update({ integrations: nextIntegrations }).eq('id', 1);
+  } catch {
+    // Non-fatal pricing breakdown metadata save
+  }
 }
 
 let inFlightSeedPromise: Promise<boolean> | null = null;
@@ -1406,9 +1569,18 @@ export async function getAdminBundle() {
       const mappedProducts = (prodRes.data ?? []).map((r) =>
         mapProductFromRow(r as Record<string, unknown>)
       );
-      const mappedOrders = (ordRes.data ?? []).map((r) =>
-        mapOrderFromRow(r as Record<string, unknown>, itemsByOrder.get(String(r.id)))
+      const { embeddedOrderPricing } = extractIntegrationsAndConfig(
+        (setRes.data as Record<string, unknown> | null)?.integrations
       );
+      const mergedOrderPricing = { ...memoryStore.orderPricing, ...embeddedOrderPricing };
+      const mappedOrders = (ordRes.data ?? []).map((r) => {
+        const orderId = String(r.id);
+        return mapOrderFromRow(
+          r as Record<string, unknown>,
+          itemsByOrder.get(orderId),
+          mergedOrderPricing[orderId]
+        );
+      });
       const computedWeekly = computeCurrentWeekStats(mappedOrders, mappedProducts).map((d) => ({
         day: d.day,
         fullDay: d.fullDay,
@@ -1570,6 +1742,7 @@ export async function upsertCheckoutPendingOrderInStore(input: {
   paymentMethod: PaymentMethod;
   items: { productId: string; size: string; quantity: number }[];
   discountApplied: boolean;
+  promoCode?: string;
   strictStock?: boolean;
 }): Promise<StoreOrder> {
   const publicData = await getPublicStoreData();
@@ -1595,8 +1768,15 @@ export async function upsertCheckoutPendingOrderInStore(input: {
     throw new Error('O saco de compras está vazio.');
   }
 
-  const subtotal = verifiedItems.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
-  const total = input.discountApplied ? +(subtotal * 0.9).toFixed(2) : +subtotal.toFixed(2);
+  const rawSubtotal = verifiedItems.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
+  const pricing = calculateAuthoritativeOrderTotals({
+    subtotal: rawSubtotal,
+    discountApplied: input.discountApplied,
+    promoCodeInput: input.promoCode,
+    settings: publicData.settings,
+    includeShipping: true,
+  });
+  const total = pricing.total;
   const requestedDraftId = typeof input.draftOrderId === 'string' ? input.draftOrderId.trim() : '';
 
   const rawEmail = input.customerEmail.trim().toLowerCase();
@@ -1701,6 +1881,10 @@ export async function upsertCheckoutPendingOrderInStore(input: {
       postalCode: safePostal,
       paymentMethod: input.paymentMethod,
       items: verifiedItems,
+      subtotal: pricing.subtotal,
+      discountAmount: pricing.discountAmount,
+      shippingFee: pricing.shippingFee,
+      promoCode: pricing.promoCode,
       total,
       status: 'Pendente',
       createdAt,
@@ -1813,6 +1997,12 @@ export async function upsertCheckoutPendingOrderInStore(input: {
       }
     }
 
+    await persistOrderPricingMeta(orderId, {
+      subtotal: pricing.subtotal,
+      discountAmount: pricing.discountAmount,
+      shippingFee: pricing.shippingFee,
+      promoCode: pricing.promoCode,
+    });
     invalidatePublicStoreCache();
     return updatedOrder;
   }
@@ -1884,11 +2074,24 @@ export async function upsertCheckoutPendingOrderInStore(input: {
     postalCode: safePostal,
     paymentMethod: input.paymentMethod,
     items: verifiedItems,
+    subtotal: pricing.subtotal,
+    discountAmount: pricing.discountAmount,
+    shippingFee: pricing.shippingFee,
+    promoCode: pricing.promoCode,
     total,
     status: 'Pendente',
     createdAt,
     progressStep: 1,
     totalSteps: 3,
+  };
+  memoryStore.orderPricing = {
+    ...memoryStore.orderPricing,
+    [orderId]: {
+      subtotal: pricing.subtotal,
+      discountAmount: pricing.discountAmount,
+      shippingFee: pricing.shippingFee,
+      promoCode: pricing.promoCode,
+    },
   };
 
   if (existingMem) {
@@ -1935,6 +2138,7 @@ export async function createOrderInStore(input: {
   paymentMethod: PaymentMethod;
   items: { productId: string; size: string; quantity: number }[];
   discountApplied: boolean;
+  promoCode?: string;
 }): Promise<StoreOrder> {
   if (input.draftOrderId && input.draftOrderId.trim()) {
     return upsertCheckoutPendingOrderInStore({
@@ -1969,8 +2173,15 @@ export async function createOrderInStore(input: {
     throw new Error('O saco de compras está vazio.');
   }
 
-  const subtotal = verifiedItems.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
-  const total = input.discountApplied ? +(subtotal * 0.9).toFixed(2) : +subtotal.toFixed(2);
+  const rawSubtotal = verifiedItems.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
+  const pricing = calculateAuthoritativeOrderTotals({
+    subtotal: rawSubtotal,
+    discountApplied: input.discountApplied,
+    promoCodeInput: input.promoCode,
+    settings: publicData.settings,
+    includeShipping: true,
+  });
+  const total = pricing.total;
   const orderId = `LUN-${Math.floor(2050 + (Date.now() % 7900))}`;
   const createdAt = new Date().toISOString().slice(0, 10);
   const normalizedEmail = input.customerEmail.trim().toLowerCase();
@@ -1985,6 +2196,10 @@ export async function createOrderInStore(input: {
     postalCode: input.postalCode.trim(),
     paymentMethod: input.paymentMethod,
     items: verifiedItems,
+    subtotal: pricing.subtotal,
+    discountAmount: pricing.discountAmount,
+    shippingFee: pricing.shippingFee,
+    promoCode: pricing.promoCode,
     total,
     status: 'Pendente',
     createdAt,
@@ -2083,6 +2298,12 @@ export async function createOrderInStore(input: {
 
     // Note: New checkout orders start as 'Pendente' (unpaid) and only add to weekly_sales when marked 'Entregue'.
 
+    await persistOrderPricingMeta(orderId, {
+      subtotal: pricing.subtotal,
+      discountAmount: pricing.discountAmount,
+      shippingFee: pricing.shippingFee,
+      promoCode: pricing.promoCode,
+    });
     invalidatePublicStoreCache();
     return { ...newOrder, customerId: resolvedCustomerId };
   }
@@ -2104,6 +2325,15 @@ export async function createOrderInStore(input: {
     memoryStore.customers = [cust, ...memoryStore.customers];
   }
   newOrder.customerId = cust.id;
+  memoryStore.orderPricing = {
+    ...memoryStore.orderPricing,
+    [orderId]: {
+      subtotal: pricing.subtotal,
+      discountAmount: pricing.discountAmount,
+      shippingFee: pricing.shippingFee,
+      promoCode: pricing.promoCode,
+    },
+  };
   memoryStore.orders = [newOrder, ...memoryStore.orders];
   memoryStore.products = memoryStore.products.map((prod) => {
     const orderedQty = verifiedItems
@@ -2155,6 +2385,7 @@ export async function createManualOrderInStore(input: {
   status: OrderStatus;
   items: ManualOrderLineInput[];
   discountApplied: boolean;
+  includeShipping?: boolean;
 }): Promise<StoreOrder> {
   const customerName = input.customerName.trim();
   if (!customerName) {
@@ -2211,8 +2442,14 @@ export async function createManualOrderInStore(input: {
     throw new Error('Adicione pelo menos um artigo à encomenda.');
   }
 
-  const subtotal = verifiedItems.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
-  const total = input.discountApplied ? +(subtotal * 0.9).toFixed(2) : +subtotal.toFixed(2);
+  const rawSubtotal = verifiedItems.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
+  const pricing = calculateAuthoritativeOrderTotals({
+    subtotal: rawSubtotal,
+    discountApplied: input.discountApplied,
+    settings: publicData.settings,
+    includeShipping: Boolean(input.includeShipping),
+  });
+  const total = pricing.total;
   const orderId = `LUN-${Math.floor(2050 + (Date.now() % 7900))}`;
   const createdAt = new Date().toISOString().slice(0, 10);
 
@@ -2239,6 +2476,10 @@ export async function createManualOrderInStore(input: {
     postalCode: (input.postalCode || '').trim() || '—',
     paymentMethod: input.paymentMethod,
     items: verifiedItems,
+    subtotal: pricing.subtotal,
+    discountAmount: pricing.discountAmount,
+    shippingFee: pricing.shippingFee,
+    promoCode: pricing.promoCode,
     total,
     status,
     createdAt,
@@ -2352,6 +2593,12 @@ export async function createManualOrderInStore(input: {
       }
     }
 
+    await persistOrderPricingMeta(orderId, {
+      subtotal: pricing.subtotal,
+      discountAmount: pricing.discountAmount,
+      shippingFee: pricing.shippingFee,
+      promoCode: pricing.promoCode,
+    });
     invalidatePublicStoreCache();
     return { ...newOrder, customerId: resolvedCustomerId };
   }
@@ -2372,6 +2619,15 @@ export async function createManualOrderInStore(input: {
     memoryStore.customers = [cust, ...memoryStore.customers];
   }
   newOrder.customerId = cust.id;
+  memoryStore.orderPricing = {
+    ...memoryStore.orderPricing,
+    [orderId]: {
+      subtotal: pricing.subtotal,
+      discountAmount: pricing.discountAmount,
+      shippingFee: pricing.shippingFee,
+      promoCode: pricing.promoCode,
+    },
+  };
   memoryStore.orders = [newOrder, ...memoryStore.orders];
   memoryStore.products = memoryStore.products.map((prod) => {
     const orderedQty = stockDeductions
@@ -2477,13 +2733,23 @@ export async function updateOrderStatusInStore(
         quantity: Number(row.quantity),
         unitPrice: Number(row.unit_price),
       }));
+      const { data: setIntegrationsRow } = await supabase
+        .from('store_settings')
+        .select('integrations')
+        .eq('id', 1)
+        .maybeSingle();
+      const { embeddedOrderPricing } = extractIntegrationsAndConfig(
+        (setIntegrationsRow as Record<string, unknown> | null)?.integrations
+      );
+      const pricingMeta = embeddedOrderPricing[orderId] || memoryStore.orderPricing[orderId];
       fullOrder = mapOrderFromRow(
         {
           ...(existingOrder as Record<string, unknown>),
           status,
           progress_step: progressStep,
         },
-        relationalItems
+        relationalItems,
+        pricingMeta
       );
     }
 
@@ -3054,6 +3320,7 @@ export async function updateSettingsInStore(
       embeddedEvents: currentEmbeddedEvents,
       embeddedNotifications: currentEmbeddedNotifications,
       embeddedWebhooks: currentEmbeddedWebhooks,
+      embeddedOrderPricing: currentEmbeddedOrderPricing,
     } = extractIntegrationsAndConfig(currentRow?.integrations);
     const currentStorefrontConfig =
       resolveStorefrontFromRow(currentRow) || memoryStore.settings.storefrontConfig;
@@ -3195,7 +3462,8 @@ export async function updateSettingsInStore(
           currentEmbeddedCosts,
           currentEmbeddedEvents,
           currentEmbeddedNotifications,
-          currentEmbeddedWebhooks
+          currentEmbeddedWebhooks,
+          currentEmbeddedOrderPricing
         );
       }
       if (nextStorefrontConfig) {
@@ -3210,7 +3478,8 @@ export async function updateSettingsInStore(
           currentEmbeddedCosts,
           currentEmbeddedEvents,
           currentEmbeddedNotifications,
-          currentEmbeddedWebhooks
+          currentEmbeddedWebhooks,
+          currentEmbeddedOrderPricing
         );
       }
     }
@@ -3255,7 +3524,8 @@ export async function updateSettingsInStore(
               currentEmbeddedCosts,
               currentEmbeddedEvents,
               currentEmbeddedNotifications,
-              currentEmbeddedWebhooks
+              currentEmbeddedWebhooks,
+              currentEmbeddedOrderPricing
             );
             res = await supabase
               .from('store_settings')
@@ -3440,6 +3710,7 @@ async function syncEmbeddedCostsToSettings(
     embeddedEvents,
     embeddedNotifications,
     embeddedWebhooks,
+    embeddedOrderPricing,
   } = extractIntegrationsAndConfig(currentRow?.integrations);
 
   const nextCosts = updater(embeddedCosts);
@@ -3449,7 +3720,8 @@ async function syncEmbeddedCostsToSettings(
     nextCosts,
     embeddedEvents,
     embeddedNotifications,
-    embeddedWebhooks
+    embeddedWebhooks,
+    embeddedOrderPricing
   );
 
   const { error } = await supabase
@@ -3682,6 +3954,7 @@ async function syncEmbeddedAnalyticsFallback(
     embeddedEvents,
     embeddedNotifications,
     embeddedWebhooks,
+    embeddedOrderPricing,
   } = extractIntegrationsAndConfig(currentRow?.integrations);
 
   const merged = [event, ...embeddedEvents.filter((e) => e.id !== event.id)].slice(0, 400);
@@ -3691,7 +3964,8 @@ async function syncEmbeddedAnalyticsFallback(
     embeddedCosts,
     merged,
     embeddedNotifications,
-    embeddedWebhooks
+    embeddedWebhooks,
+    embeddedOrderPricing
   );
 
   const { error } = await supabase
@@ -3982,6 +4256,7 @@ export async function recordOrderNotificationInStore(
       embeddedEvents,
       embeddedNotifications,
       embeddedWebhooks,
+      embeddedOrderPricing,
     } = extractIntegrationsAndConfig(currentRow?.integrations);
 
     const merged = [
@@ -3995,7 +4270,8 @@ export async function recordOrderNotificationInStore(
       embeddedCosts,
       embeddedEvents,
       merged,
-      embeddedWebhooks
+      embeddedWebhooks,
+      embeddedOrderPricing
     );
 
     await supabase.from('store_settings').update({ integrations: nextIntegrations }).eq('id', 1);
@@ -4056,6 +4332,7 @@ export async function recordSaleWebhookDeliveryInStore(
       embeddedEvents,
       embeddedNotifications,
       embeddedWebhooks,
+      embeddedOrderPricing,
     } = extractIntegrationsAndConfig(currentRow?.integrations);
 
     const merged = [
@@ -4069,7 +4346,8 @@ export async function recordSaleWebhookDeliveryInStore(
       embeddedCosts,
       embeddedEvents,
       embeddedNotifications,
-      merged
+      merged,
+      embeddedOrderPricing
     );
 
     await supabase.from('store_settings').update({ integrations: nextIntegrations }).eq('id', 1);
