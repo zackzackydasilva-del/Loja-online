@@ -39,22 +39,22 @@ export const StorefrontBottomBanner: React.FC<StorefrontBottomBannerProps> = ({
       aria-label="Banner de destaque após produtos"
       className={compact ? 'bg-white pt-2 pb-6 sm:pb-8' : 'bg-white pt-2 pb-10 sm:pb-14'}
     >
-      <div className="max-w-[1360px] lg:max-w-[960px] xl:max-w-[1000px] mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="max-w-[1360px] lg:max-w-[820px] xl:max-w-[880px] mx-auto px-4 sm:px-6 lg:px-8">
         {hasVisualSlides && currentSlide ? (
           <div className="relative rounded-[22px] sm:rounded-[28px] overflow-hidden bg-[#09090B] text-white shadow-[0_14px_34px_-18px_rgba(0,0,0,0.4)]">
             {/* Complete full-bleed image filling the entire banner with zero empty space */}
             <SafeImage
               src={currentSlide.image}
               alt={currentSlide.caption || bottomBanner.title}
-              className="w-full h-auto lg:h-[295px] xl:h-[315px] lg:object-cover lg:object-center block transition-opacity duration-300"
+              className="w-full h-auto block transition-opacity duration-300"
             />
 
             {/* Dark effects strictly on the outer borders/edges only */}
             <div className="absolute inset-0 pointer-events-none shadow-[inset_0_0_54px_14px_rgba(9,9,11,0.9)] sm:shadow-[inset_0_0_88px_22px_rgba(9,9,11,0.92)]" />
-            <div className="absolute inset-x-0 top-0 h-8 sm:h-12 lg:h-12 bg-gradient-to-b from-[#09090B]/85 to-transparent pointer-events-none" />
-            <div className="absolute inset-x-0 bottom-0 h-10 sm:h-14 lg:h-14 bg-gradient-to-t from-[#09090B]/90 to-transparent pointer-events-none" />
-            <div className="absolute inset-y-0 left-0 w-8 sm:w-14 lg:w-14 bg-gradient-to-r from-[#09090B]/85 to-transparent pointer-events-none" />
-            <div className="absolute inset-y-0 right-0 w-8 sm:w-14 lg:w-14 bg-gradient-to-l from-[#09090B]/85 to-transparent pointer-events-none" />
+            <div className="absolute inset-x-0 top-0 h-8 sm:h-12 lg:h-14 bg-gradient-to-b from-[#09090B]/85 to-transparent pointer-events-none" />
+            <div className="absolute inset-x-0 bottom-0 h-10 sm:h-14 lg:h-16 bg-gradient-to-t from-[#09090B]/90 to-transparent pointer-events-none" />
+            <div className="absolute inset-y-0 left-0 w-8 sm:w-14 lg:w-16 bg-gradient-to-r from-[#09090B]/85 to-transparent pointer-events-none" />
+            <div className="absolute inset-y-0 right-0 w-8 sm:w-14 lg:w-16 bg-gradient-to-l from-[#09090B]/85 to-transparent pointer-events-none" />
 
             {/* Overlay Copy, Thumbnails & White CTA */}
             <div className="absolute inset-0 z-10 p-4 sm:p-8 lg:p-9 flex flex-col justify-between pointer-events-none">
