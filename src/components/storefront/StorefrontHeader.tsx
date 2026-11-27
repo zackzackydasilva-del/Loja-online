@@ -90,55 +90,70 @@ export const StorefrontHeader: React.FC<StorefrontHeaderProps> = ({
           ))}
         </div>
       </div>
-      <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 h-12 sm:h-16 flex items-center justify-between gap-6">
-        {/* Zone 1: Brand Wordmark */}
-        <button
-          type="button"
-          onClick={() => onNavigateSection('top', 'Todos')}
-          className="font-serif text-[22px] sm:text-2xl tracking-[0.12em] font-semibold text-[#111111] whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#111111]"
-        >
-          {wordmark}
-        </button>
-
-        {/* Zone 2: Clean Desktop Navigation Links */}
-        <nav className="hidden md:flex items-center gap-7 lg:gap-10 text-[13px] lg:text-sm font-medium text-[#555555]">
-          <button
-            type="button"
-            onClick={() => onNavigateSection('top', 'Todos')}
-            className="hover:text-[#111111] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-          >
-            {cfg.navLabels.collections}
-          </button>
-          <button
-            type="button"
-            onClick={() => onNavigateSection('catalog', 'Mulher')}
-            className="hover:text-[#111111] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-          >
-            {cfg.navLabels.apparel}
-          </button>
-          <button
-            type="button"
-            onClick={() => onNavigateSection('catalog', 'Malas')}
-            className="hover:text-[#111111] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-          >
-            {cfg.navLabels.accessories}
-          </button>
-          <button
-            type="button"
-            onClick={() => onNavigateSection('catalog', 'Saldos')}
-            className="hover:text-[#111111] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-          >
-            {cfg.navLabels.sale}
-          </button>
-        </nav>
-
-        {/* Zone 3: Minimalist Search, Wishlist (PC), Profile & Shopping Bag Icon */}
-        <div className="flex items-center gap-1.5 lg:gap-2 shrink-0">
+      <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 h-12 sm:h-16 grid grid-cols-[1fr_auto_1fr] items-center gap-2 md:gap-4">
+        {/* Zone 1 (Left): Mobile Search Trigger + Desktop Navigation Links */}
+        <div className="min-w-0 justify-self-start flex items-center">
           <button
             type="button"
             onClick={onToggleSearch}
             aria-label="Pesquisar catálogo"
-            className={`flex w-9 h-9 items-center justify-center rounded-full transition-colors cursor-pointer ${
+            className={`flex md:hidden w-9 h-9 items-center justify-center rounded-full transition-colors cursor-pointer ${
+              searchOpen
+                ? 'bg-[#111111] text-white'
+                : 'text-[#111111] hover:bg-[#F3F3F3]'
+            }`}
+          >
+            {searchOpen ? <X className="w-4 h-4" /> : <Search className="w-4 h-4" />}
+          </button>
+
+          <nav className="hidden md:flex items-center gap-2.5 lg:gap-6 text-[11.5px] lg:text-sm font-medium text-[#555555]">
+            <button
+              type="button"
+              onClick={() => onNavigateSection('top', 'Todos')}
+              className="hover:text-[#111111] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              {cfg.navLabels.collections}
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigateSection('catalog', 'Mulher')}
+              className="hover:text-[#111111] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              {cfg.navLabels.apparel}
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigateSection('catalog', 'Malas')}
+              className="hover:text-[#111111] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              {cfg.navLabels.accessories}
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigateSection('catalog', 'Saldos')}
+              className="hover:text-[#111111] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              {cfg.navLabels.sale}
+            </button>
+          </nav>
+        </div>
+
+        {/* Zone 2 (Center): Centered Brand Wordmark */}
+        <button
+          type="button"
+          onClick={() => onNavigateSection('top', 'Todos')}
+          className="justify-self-center font-serif text-[20px] sm:text-2xl tracking-[0.12em] font-semibold text-[#111111] whitespace-nowrap truncate max-w-[190px] sm:max-w-[280px] lg:max-w-none cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#111111]"
+        >
+          {wordmark}
+        </button>
+
+        {/* Zone 3 (Right): Desktop Search, Wishlist (PC), Profile (PC) & Shopping Bag */}
+        <div className="justify-self-end flex items-center gap-1.5 lg:gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={onToggleSearch}
+            aria-label="Pesquisar catálogo"
+            className={`hidden md:flex w-9 h-9 items-center justify-center rounded-full transition-colors cursor-pointer ${
               searchOpen
                 ? 'bg-[#111111] text-white'
                 : 'text-[#111111] hover:bg-[#F3F3F3]'
@@ -174,7 +189,7 @@ export const StorefrontHeader: React.FC<StorefrontHeaderProps> = ({
           <button
             type="button"
             onClick={onOpenProfile}
-            aria-label="Perfil e Newsletter"
+            aria-label="Perfil e Rastreio"
             className="hidden md:flex w-9 h-9 items-center justify-center rounded-full text-[#111111] hover:bg-[#F3F3F3] transition-colors cursor-pointer"
           >
             <User className="w-[18px] h-[18px]" strokeWidth={1.8} />

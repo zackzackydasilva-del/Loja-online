@@ -17,10 +17,19 @@ export const WhatsAppSupportButton: React.FC = () => {
       href={whatsappHref}
       target="_blank"
       rel="noopener noreferrer"
-      aria-label={`Suporte via WhatsApp (${WHATSAPP_DISPLAY})`}
+      aria-label={`Suporte via WhatsApp (${WHATSAPP_DISPLAY}) · 1 mensagem`}
       title={`Falar no WhatsApp: ${WHATSAPP_DISPLAY}`}
       className="fixed bottom-24 right-4 md:bottom-6 md:right-6 z-30 print:hidden group inline-flex items-center gap-2.5 h-12 w-12 sm:w-auto sm:px-4 rounded-full bg-[#25D366] hover:bg-[#1EBE5D] text-white shadow-[0_10px_28px_-6px_rgba(37,211,102,0.55)] hover:shadow-[0_14px_34px_-6px_rgba(37,211,102,0.7)] transition-all duration-200 hover:-translate-y-0.5 justify-center"
     >
+      <span className="absolute -top-1.5 -right-1.5 flex h-[22px] min-w-[22px] items-center justify-center">
+        <span
+          aria-hidden="true"
+          className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-80"
+        />
+        <span className="relative inline-flex items-center justify-center h-[22px] min-w-[22px] px-1 rounded-full bg-[#DC2626] text-white text-[11px] font-bold leading-none tabular-nums ring-2 ring-white shadow-sm animate-pulse">
+          1
+        </span>
+      </span>
       <svg
         viewBox="0 0 24 24"
         fill="currentColor"
