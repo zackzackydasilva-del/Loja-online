@@ -7,6 +7,7 @@ import {
   Copy,
   CreditCard,
   ExternalLink,
+  ImagePlus,
   LayoutTemplate,
   Lock,
   Mail,
@@ -35,6 +36,7 @@ import {
 } from '../../types/store';
 import { formatMoney } from '../../utils/currency';
 import { buildCategoryUrl, buildProductUrl } from '../../utils/categoryLinks';
+import { compressImageFileToDataUrl } from '../../utils/imageUpload';
 import { playOrderNotificationSound } from '../../utils/notificationSound';
 import { ImageField } from './ImageField';
 
@@ -85,14 +87,38 @@ function mergeStorefrontConfig(cfg?: Partial<StorefrontConfig>): StorefrontConfi
           : DEFAULT_STOREFRONT_CONFIG.bottomBanner!.slides,
     },
     highlights: Array.isArray(cfg?.highlights) ? cfg.highlights.slice(0, MAX_HIGHLIGHTS) : [],
-    entryPopup: {
-      ...DEFAULT_STOREFRONT_CONFIG.entryPopup!,
-      ...(cfg?.entryPopup || {}),
-    },
-    postCheckoutPopup: {
-      ...DEFAULT_STOREFRONT_CONFIG.postCheckoutPopup!,
-      ...(cfg?.postCheckoutPopup || {}),
-    },
+    entryPopup: (() => {
+      const merged: StorePopupConfig = {
+        ...DEFAULT_STOREFRONT_CONFIG.entryPopup!,
+        ...(cfg?.entryPopup || {}),
+      };
+      const imgs = Array.isArray(merged.images)
+        ? merged.images.map((s) => s.trim()).filter(Boolean)
+        : [];
+      const fallbackImg = merged.image?.trim() || '';
+      const finalImgs = imgs.length > 0 ? imgs : fallbackImg ? [fallbackImg] : [];
+      return {
+        ...merged,
+        image: finalImgs[0] || fallbackImg || '',
+        images: finalImgs,
+      };
+    })(),
+    postCheckoutPopup: (() => {
+      const merged: StorePopupConfig = {
+        ...DEFAULT_STOREFRONT_CONFIG.postCheckoutPopup!,
+        ...(cfg?.postCheckoutPopup || {}),
+      };
+      const imgs = Array.isArray(merged.images)
+        ? merged.images.map((s) => s.trim()).filter(Boolean)
+        : [];
+      const fallbackImg = merged.image?.trim() || '';
+      const finalImgs = imgs.length > 0 ? imgs : fallbackImg ? [fallbackImg] : [];
+      return {
+        ...merged,
+        image: finalImgs[0] || fallbackImg || '',
+        images: finalImgs,
+      };
+    })(),
     orderNotification: {
       ...DEFAULT_STOREFRONT_CONFIG.orderNotification!,
       ...(cfg?.orderNotification || {}),
@@ -178,6 +204,7 @@ export const AdminSettings: React.FC = () => {
   const [newChannelName, setNewChannelName] = useState('');
   const [newChannelRole, setNewChannelRole] = useState('');
   const [newPaymentLabel, setNewPaymentLabel] = useState('');
+  const [uploadingPopupBatchKey, setUploadingPopupBatchKey] = useState<'entry' | 'postCheckout' | null>(null);
 
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearingData, setClearingData] = useState(false);
@@ -301,6 +328,25 @@ export const AdminSettings: React.FC = () => {
           : cleanedPaymentMethods.map((m, idx) => (idx === 0 ? { ...m, enabled: true } : m))
         : DEFAULT_STOREFRONT_CONFIG.paymentMethods;
 
+    const normalizePopupForSave = (
+      raw: StorePopupConfig | undefined,
+      fallback: StorePopupConfig
+    ): StorePopupConfig => {
+      const base: StorePopupConfig = { ...fallback, ...(raw || {}) };
+      const cleanImages = (Array.isArray(base.images) ? base.images : [])
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .slice(0, 20);
+      const fallbackSingle = base.image?.trim() || '';
+      const finalImages =
+        cleanImages.length > 0 ? cleanImages : fallbackSingle ? [fallbackSingle] : [];
+      return {
+        ...base,
+        image: finalImages[0] || '',
+        images: finalImages,
+      };
+    };
+
     const preparedSf: StorefrontConfig = {
       ...nextSf,
       categoryStripItems:
@@ -308,6 +354,11 @@ export const AdminSettings: React.FC = () => {
           ? cleanedCategoryStrip
           : DEFAULT_STOREFRONT_CONFIG.categoryStripItems,
       paymentMethods: normalizedPaymentMethods,
+      entryPopup: normalizePopupForSave(nextSf.entryPopup, DEFAULT_STOREFRONT_CONFIG.entryPopup!),
+      postCheckoutPopup: normalizePopupForSave(
+        nextSf.postCheckoutPopup,
+        DEFAULT_STOREFRONT_CONFIG.postCheckoutPopup!
+      ),
       highlights: (nextSf.highlights || []).slice(0, MAX_HIGHLIGHTS).map((hl) => ({
         ...hl,
         productId: '',
@@ -3069,14 +3120,197 @@ export const AdminSettings: React.FC = () => {
                     </div>
                   </div>
 
-                  <ImageField
-                    label="Imagem do Banner Popup (opcional)"
-                    recommendedSize="800 × 600 px"
-                    value={current.image || ''}
-                    onChange={(nextUrl) => updatePopup({ image: nextUrl })}
-                    allowEmpty
-                    uploadFolder="banners"
-                  />
+                  {(() => {
+                    const popupImages: string[] =
+                      Array.isArray(current.images) && current.images.length > 0
+                        ? current.images
+                        : current.image
+                        ? [current.image]
+                        : [];
+                    const filledCount = popupImages.filter((s) => s.trim()).length;
+
+                    const applyPopupImages = (nextList: string[]) => {
+                      const trimmedFirst = nextList.map((s) => s.trim()).find(Boolean) || '';
+                      updatePopup({
+                        images: nextList.slice(0, 20),
+                        image: trimmedFirst,
+                      });
+                    };
+
+                    const handleBatchUpload = async (
+                      e: React.ChangeEvent<HTMLInputElement>
+                    ) => {
+                      const files = Array.from(e.target.files || []);
+                      e.target.value = '';
+                      if (files.length === 0) return;
+                      const remainingSlots = Math.max(0, 20 - popupImages.filter((s) => s.trim()).length);
+                      if (remainingSlots <= 0) return;
+                      const targetFiles = files.slice(0, remainingSlots);
+                      if (targetFiles.length === 0) return;
+
+                      setUploadingPopupBatchKey(card.key);
+                      try {
+                        const uploadedUrls = await Promise.all(
+                          targetFiles.map(async (file) => {
+                            const dataUrl = await compressImageFileToDataUrl(file);
+                            let finalUrl = dataUrl;
+                            if (adminToken) {
+                              try {
+                                const res = await fetch('/api/admin/upload-image', {
+                                  method: 'POST',
+                                  headers: {
+                                    'Content-Type': 'application/json',
+                                    Authorization: `Bearer ${adminToken}`,
+                                  },
+                                  body: JSON.stringify({ dataUrl, folder: 'banners' }),
+                                });
+                                if (res.ok) {
+                                  const payload = await res.json().catch(() => null);
+                                  if (payload?.url && typeof payload.url === 'string') {
+                                    finalUrl = payload.url;
+                                  }
+                                }
+                              } catch {
+                                // Keep compressed data URL fallback
+                              }
+                            }
+                            return finalUrl;
+                          })
+                        );
+                        const existingFilled = popupImages.filter((s) => s.trim());
+                        applyPopupImages([...existingFilled, ...uploadedUrls].slice(0, 20));
+                      } finally {
+                        setUploadingPopupBatchKey(null);
+                      }
+                    };
+
+                    return (
+                      <div className="p-3.5 rounded-2xl bg-[#F5F4F0] border border-black/5 space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <p className="text-xs font-semibold text-[#1C1C1E]">
+                              Imagens do Banner Popup ({filledCount})
+                            </p>
+                            <p className="text-[11px] text-[#72726E]">
+                              Coloque 7 ou mais imagens (até 20). Mudam automaticamente a cada 2 segundos.
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#1C1C1E] text-white text-[11px] font-medium hover:bg-[#323235] cursor-pointer whitespace-nowrap">
+                              <ImagePlus className="w-3.5 h-3.5" />
+                              <span>
+                                {uploadingPopupBatchKey === card.key
+                                  ? 'A carregar...'
+                                  : 'Carregar Várias Fotos'}
+                              </span>
+                              <input
+                                type="file"
+                                multiple
+                                accept="image/png,image/jpeg,image/webp"
+                                onChange={handleBatchUpload}
+                                className="hidden"
+                              />
+                            </label>
+                            {popupImages.length < 20 && (
+                              <button
+                                type="button"
+                                onClick={() => applyPopupImages([...popupImages, ''])}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-white border border-black/15 text-[11px] font-medium text-[#1C1C1E] hover:bg-black/5 cursor-pointer whitespace-nowrap"
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                                <span>Adicionar Espaço</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {popupImages.length === 0 ? (
+                          <div className="rounded-xl bg-white border border-dashed border-black/15 p-4 text-center space-y-2">
+                            <p className="text-xs text-[#72726E]">
+                              Nenhuma imagem adicionada ainda neste popup.
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                applyPopupImages(['', '', '', '', '', '', ''])
+                              }
+                              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-[#1C1C1E] text-white text-xs font-medium hover:bg-[#323235] cursor-pointer"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                              <span>Preparar 7 Espaços de Imagem</span>
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="space-y-2.5 max-h-[420px] overflow-y-auto pr-1">
+                            {popupImages.map((imgUrl, idx) => (
+                              <div
+                                key={`${card.key}-img-${idx}`}
+                                className="bg-white rounded-xl border border-black/8 p-3 space-y-2"
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-[11px] font-semibold text-[#1C1C1E]">
+                                    Imagem {idx + 1}
+                                  </span>
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      disabled={idx === 0}
+                                      onClick={() => {
+                                        const next = [...popupImages];
+                                        [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
+                                        applyPopupImages(next);
+                                      }}
+                                      aria-label={`Mover imagem ${idx + 1} para cima`}
+                                      className="p-1 rounded-lg hover:bg-black/5 disabled:opacity-30 cursor-pointer"
+                                    >
+                                      <ArrowUp className="w-3.5 h-3.5 text-[#555552]" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={idx === popupImages.length - 1}
+                                      onClick={() => {
+                                        const next = [...popupImages];
+                                        [next[idx + 1], next[idx]] = [next[idx], next[idx + 1]];
+                                        applyPopupImages(next);
+                                      }}
+                                      aria-label={`Mover imagem ${idx + 1} para baixo`}
+                                      className="p-1 rounded-lg hover:bg-black/5 disabled:opacity-30 cursor-pointer"
+                                    >
+                                      <ArrowDown className="w-3.5 h-3.5 text-[#555552]" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const next = popupImages.filter((_, i) => i !== idx);
+                                        applyPopupImages(next);
+                                      }}
+                                      aria-label={`Remover imagem ${idx + 1}`}
+                                      className="p-1 rounded-lg text-[#72726E] hover:text-red-600 hover:bg-red-50 cursor-pointer"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </div>
+
+                                <ImageField
+                                  compact
+                                  recommendedSize="800 × 600 px"
+                                  value={imgUrl}
+                                  onChange={(nextUrl) => {
+                                    const next = [...popupImages];
+                                    next[idx] = nextUrl;
+                                    applyPopupImages(next);
+                                  }}
+                                  allowEmpty
+                                  uploadFolder="banners"
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </section>
               );
             })}

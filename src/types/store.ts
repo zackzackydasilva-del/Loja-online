@@ -212,6 +212,7 @@ export interface StorePopupConfig {
   title: string;
   subtitle: string;
   image: string;
+  images?: string[];
   ctaText: string;
   productId?: string;
   buttonUrl?: string;

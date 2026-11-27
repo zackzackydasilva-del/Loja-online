@@ -28,6 +28,7 @@ import type {
   StorefrontConfig,
   StoreGoal,
   StoreOrder,
+  StorePopupConfig,
   StoreSettings,
   StoreTask,
   VisitorStage,
@@ -131,14 +132,38 @@ function mergeStorefrontConfig(raw: unknown): StorefrontConfig {
               : 'Todos',
         }))
       : [],
-    entryPopup: {
-      ...DEFAULT_STOREFRONT_CONFIG.entryPopup!,
-      ...(obj.entryPopup || {}),
-    },
-    postCheckoutPopup: {
-      ...DEFAULT_STOREFRONT_CONFIG.postCheckoutPopup!,
-      ...(obj.postCheckoutPopup || {}),
-    },
+    entryPopup: (() => {
+      const mergedPopup: StorePopupConfig = {
+        ...DEFAULT_STOREFRONT_CONFIG.entryPopup!,
+        ...(obj.entryPopup || {}),
+      };
+      const rawImgs = Array.isArray(mergedPopup.images)
+        ? mergedPopup.images.map((s) => String(s || '').trim()).filter(Boolean).slice(0, 20)
+        : [];
+      const fallbackSingle = String(mergedPopup.image || '').trim();
+      const finalImgs = rawImgs.length > 0 ? rawImgs : fallbackSingle ? [fallbackSingle] : [];
+      return {
+        ...mergedPopup,
+        image: finalImgs[0] || fallbackSingle || '',
+        images: finalImgs,
+      };
+    })(),
+    postCheckoutPopup: (() => {
+      const mergedPopup: StorePopupConfig = {
+        ...DEFAULT_STOREFRONT_CONFIG.postCheckoutPopup!,
+        ...(obj.postCheckoutPopup || {}),
+      };
+      const rawImgs = Array.isArray(mergedPopup.images)
+        ? mergedPopup.images.map((s) => String(s || '').trim()).filter(Boolean).slice(0, 20)
+        : [];
+      const fallbackSingle = String(mergedPopup.image || '').trim();
+      const finalImgs = rawImgs.length > 0 ? rawImgs : fallbackSingle ? [fallbackSingle] : [];
+      return {
+        ...mergedPopup,
+        image: finalImgs[0] || fallbackSingle || '',
+        images: finalImgs,
+      };
+    })(),
     orderNotification: {
       ...DEFAULT_STOREFRONT_CONFIG.orderNotification!,
       ...(obj.orderNotification || {}),
@@ -3508,19 +3533,29 @@ export async function updateSettingsInStore(
           }))
         );
       }
-      if (merged.entryPopup?.image) {
-        merged.entryPopup.image = await persistImageAsset(
-          supabase,
-          merged.entryPopup.image,
-          'banners'
-        );
+      if (merged.entryPopup) {
+        const entryImgs = Array.isArray(merged.entryPopup.images)
+          ? merged.entryPopup.images.map((s) => s.trim()).filter(Boolean)
+          : merged.entryPopup.image?.trim()
+          ? [merged.entryPopup.image.trim()]
+          : [];
+        const persistedEntryImgs = (
+          await Promise.all(entryImgs.map((img) => persistImageAsset(supabase, img, 'banners')))
+        ).filter(Boolean);
+        merged.entryPopup.images = persistedEntryImgs;
+        merged.entryPopup.image = persistedEntryImgs[0] || '';
       }
-      if (merged.postCheckoutPopup?.image) {
-        merged.postCheckoutPopup.image = await persistImageAsset(
-          supabase,
-          merged.postCheckoutPopup.image,
-          'banners'
-        );
+      if (merged.postCheckoutPopup) {
+        const postImgs = Array.isArray(merged.postCheckoutPopup.images)
+          ? merged.postCheckoutPopup.images.map((s) => s.trim()).filter(Boolean)
+          : merged.postCheckoutPopup.image?.trim()
+          ? [merged.postCheckoutPopup.image.trim()]
+          : [];
+        const persistedPostImgs = (
+          await Promise.all(postImgs.map((img) => persistImageAsset(supabase, img, 'banners')))
+        ).filter(Boolean);
+        merged.postCheckoutPopup.images = persistedPostImgs;
+        merged.postCheckoutPopup.image = persistedPostImgs[0] || '';
       }
       if (merged.newsletter?.image) {
         merged.newsletter.image = await persistImageAsset(

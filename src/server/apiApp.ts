@@ -1055,6 +1055,19 @@ app.patch('/api/admin/settings', requireAdminAuth, async (req, res) => {
       const sanitizePopupField = (rawPopup: any) => {
         if (!rawPopup || typeof rawPopup !== 'object') return undefined;
         const rawImg = typeof rawPopup.image === 'string' ? rawPopup.image.trim() : '';
+        const safeSingleImg = rawImg && isSafeAssetUrl(rawImg) ? rawImg : '';
+        const rawImages = Array.isArray(rawPopup.images) ? rawPopup.images : [];
+        const cleanedImages = rawImages
+          .filter((item: unknown): item is string => typeof item === 'string')
+          .map((item: string) => item.trim())
+          .filter((item: string) => Boolean(item) && isSafeAssetUrl(item))
+          .slice(0, 20);
+        const finalImages =
+          cleanedImages.length > 0
+            ? cleanedImages
+            : safeSingleImg
+            ? [safeSingleImg]
+            : [];
         const rawUrl = typeof rawPopup.buttonUrl === 'string' ? rawPopup.buttonUrl.trim() : '';
         return {
           enabled: Boolean(rawPopup.enabled),
@@ -1062,7 +1075,8 @@ app.patch('/api/admin/settings', requireAdminAuth, async (req, res) => {
           title: typeof rawPopup.title === 'string' ? rawPopup.title.trim().slice(0, 140) : '',
           subtitle: typeof rawPopup.subtitle === 'string' ? rawPopup.subtitle.trim().slice(0, 280) : '',
           ctaText: typeof rawPopup.ctaText === 'string' ? rawPopup.ctaText.trim().slice(0, 60) : 'Ver Produto',
-          image: rawImg && isSafeAssetUrl(rawImg) ? rawImg : '',
+          image: finalImages[0] || safeSingleImg || '',
+          images: finalImages,
           productId: typeof rawPopup.productId === 'string' ? rawPopup.productId.trim().slice(0, 100) : '',
           buttonUrl: isSafeButtonLink(rawUrl) ? rawUrl.slice(0, 500) : '',
         };

@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Sparkles, X } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import { formatMoney } from '../../utils/currency';
@@ -17,12 +17,35 @@ export const StorefrontPopupModal: React.FC = () => {
     setSearchQuery,
   } = useStore();
 
+  const [slideIndex, setSlideIndex] = useState(0);
+
   const popup = useMemo(() => {
     const cfg = settings.storefrontConfig;
     if (activePopup === 'entry') return cfg.entryPopup || null;
     if (activePopup === 'postCheckout') return cfg.postCheckoutPopup || null;
     return null;
   }, [activePopup, settings.storefrontConfig]);
+
+  const bannerImages = useMemo(() => {
+    if (!popup) return [] as string[];
+    const list = Array.isArray(popup.images)
+      ? popup.images.map((s) => s.trim()).filter(Boolean)
+      : [];
+    if (list.length > 0) return list;
+    return popup.image?.trim() ? [popup.image.trim()] : [];
+  }, [popup]);
+
+  useEffect(() => {
+    setSlideIndex(0);
+  }, [activePopup, bannerImages.length]);
+
+  useEffect(() => {
+    if (!activePopup || !popup?.enabled || bannerImages.length <= 1) return;
+    const timer = window.setInterval(() => {
+      setSlideIndex((prev) => (prev + 1) % bannerImages.length);
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [activePopup, popup?.enabled, bannerImages.length]);
 
   const linkedProduct = useMemo(() => {
     if (!popup) return undefined;
@@ -73,7 +96,8 @@ export const StorefrontPopupModal: React.FC = () => {
 
   if (!activePopup || !popup || !popup.enabled) return null;
 
-  const hasBannerImage = Boolean(popup.image && popup.image.trim());
+  const hasBannerImage = bannerImages.length > 0;
+  const activeSlideIndex = hasBannerImage ? slideIndex % bannerImages.length : 0;
   const ctaLabel =
     popup.ctaText?.trim() || (linkedProduct ? 'Ver Produto' : 'Explorar Coleção');
 
@@ -113,18 +137,45 @@ export const StorefrontPopupModal: React.FC = () => {
           type="button"
           onClick={closePopup}
           aria-label="Fechar popup"
-          className="absolute top-2.5 right-2.5 z-10 w-7 h-7 rounded-full bg-black/65 hover:bg-black/85 text-white flex items-center justify-center backdrop-blur-xs transition-colors cursor-pointer"
+          className="absolute top-2.5 right-2.5 z-20 w-7 h-7 rounded-full bg-black/65 hover:bg-black/85 text-white flex items-center justify-center backdrop-blur-xs transition-colors cursor-pointer"
         >
           <X className="w-3.5 h-3.5" />
         </button>
 
         {hasBannerImage ? (
-          <div className="w-full bg-[#F5F4F0] flex items-center justify-center overflow-hidden">
-            <SafeImage
-              src={popup.image}
-              alt={popup.title || 'Destaque'}
-              className="w-full h-auto max-h-[200px] object-contain object-center block"
-            />
+          <div className="relative w-full h-[190px] sm:h-[205px] bg-[#F5F4F0] flex items-center justify-center overflow-hidden">
+            {bannerImages.map((imgSrc, idx) => (
+              <div
+                key={`${imgSrc.slice(0, 48)}-${idx}`}
+                className={`absolute inset-0 w-full h-full flex items-center justify-center transition-opacity duration-500 ${
+                  idx === activeSlideIndex ? 'opacity-100 z-[1]' : 'opacity-0 z-0 pointer-events-none'
+                }`}
+              >
+                <SafeImage
+                  src={imgSrc}
+                  alt={`${popup.title || 'Destaque'} ${idx + 1}`}
+                  className="w-full h-full object-contain object-center block"
+                />
+              </div>
+            ))}
+
+            {bannerImages.length > 1 && (
+              <div className="absolute bottom-2 inset-x-0 z-10 flex items-center justify-center gap-1.5 px-3">
+                {bannerImages.map((_, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => setSlideIndex(idx)}
+                    aria-label={`Ver imagem ${idx + 1}`}
+                    className={`h-1.5 rounded-full transition-all cursor-pointer ${
+                      idx === activeSlideIndex
+                        ? 'w-5 bg-[#111111]'
+                        : 'w-1.5 bg-black/30 hover:bg-black/55'
+                    }`}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         ) : (
           <div className="w-full bg-[#111111] px-5 pt-5 pb-4 text-white flex items-center gap-2">
