@@ -20,7 +20,11 @@ interface OrderLineDraft {
   unitPrice: string;
 }
 
-const PAYMENT_OPTIONS: PaymentMethod[] = ['Multicaixa Express', 'Cartão', 'Contra-Reembolso'];
+const DEFAULT_PAYMENT_OPTIONS: PaymentMethod[] = [
+  'Multicaixa Express',
+  'Cartão',
+  'Contra-Reembolso',
+];
 const STATUS_OPTIONS: { value: OrderStatus; label: string }[] = [
   { value: 'Pendente', label: 'Pendente (Não contabiliza como pago)' },
   { value: 'Entregue', label: 'Entregue (Pago e contabilizado)' },
@@ -47,6 +51,15 @@ export const ManualOrderModal: React.FC<ManualOrderModalProps> = ({
   const [lines, setLines] = useState<OrderLineDraft[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+
+  const paymentOptions = useMemo<PaymentMethod[]>(() => {
+    const configured = settings.storefrontConfig?.paymentMethods;
+    if (Array.isArray(configured) && configured.length > 0) {
+      const enabled = configured.filter((m) => m.enabled && m.label.trim()).map((m) => m.label);
+      if (enabled.length > 0) return enabled;
+    }
+    return DEFAULT_PAYMENT_OPTIONS;
+  }, [settings.storefrontConfig?.paymentMethods]);
 
   const promoPercent = Math.max(
     0,
@@ -90,12 +103,12 @@ export const ManualOrderModal: React.FC<ManualOrderModalProps> = ({
     setCity('Luanda');
     setShippingAddress('');
     setPostalCode('');
-    setPaymentMethod('Multicaixa Express');
+    setPaymentMethod(paymentOptions[0] || 'Multicaixa Express');
     setStatus('Pendente');
     setDiscountApplied(false);
     setIncludeShipping(false);
     setLines([buildDefaultLine()]);
-  }, [isOpen]);
+  }, [isOpen, paymentOptions]);
 
   const handleSelectExistingCustomer = (custId: string) => {
     setSelectedCustomerId(custId);
@@ -547,7 +560,7 @@ export const ManualOrderModal: React.FC<ManualOrderModalProps> = ({
               onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
               className="w-full bg-white border border-black/15 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#1C1C1E]"
             >
-              {PAYMENT_OPTIONS.map((pm) => (
+              {paymentOptions.map((pm) => (
                 <option key={pm} value={pm}>
                   {pm}
                 </option>

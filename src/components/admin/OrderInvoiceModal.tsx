@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { CheckCircle2, Clock, Download, Printer, X } from 'lucide-react';
+import { Check, CheckCircle2, Clock, Copy, Download, Printer, X } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import { OrderStatus, StoreOrder } from '../../types/store';
 import { formatMoney } from '../../utils/currency';
@@ -18,6 +18,7 @@ export const OrderInvoiceModal: React.FC<OrderInvoiceModalProps> = ({
   onChangeStatus,
 }) => {
   const { settings, products, customers } = useStore();
+  const [copiedTracking, setCopiedTracking] = useState(false);
 
   if (!order) return null;
 
@@ -177,6 +178,14 @@ export const OrderInvoiceModal: React.FC<OrderInvoiceModalProps> = ({
               <p className="text-base font-mono font-semibold text-[#1C1C1E]">
                 FAC-{order.id}
               </p>
+              {order.trackingCode && (
+                <>
+                  <p className="text-[11px] text-[#72726E] pt-1">Código de Rastreio</p>
+                  <p className="text-xs font-mono font-bold text-[#1C1C1E] tracking-wide">
+                    {order.trackingCode}
+                  </p>
+                </>
+              )}
               <p className="text-[11px] text-[#72726E] pt-1">Data de Registo</p>
               <p className="text-xs font-mono font-medium text-[#1C1C1E]">{order.createdAt}</p>
             </div>
@@ -212,6 +221,26 @@ export const OrderInvoiceModal: React.FC<OrderInvoiceModalProps> = ({
                 <span className="text-[#72726E]">Referência do Pedido:</span>{' '}
                 <span className="font-mono font-medium text-[#1C1C1E]">#{order.id}</span>
               </p>
+              {order.trackingCode && (
+                <div className="text-xs text-[#555552] flex flex-wrap items-center gap-1.5">
+                  <span className="text-[#72726E]">Código de Rastreio:</span>
+                  <span className="font-mono font-semibold text-[#1C1C1E]">
+                    {order.trackingCode}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard?.writeText(order.trackingCode || '');
+                      setCopiedTracking(true);
+                      window.setTimeout(() => setCopiedTracking(false), 1800);
+                    }}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-white border border-black/10 text-[10px] font-medium text-[#1C1C1E] hover:bg-black/5 cursor-pointer print:hidden"
+                  >
+                    {copiedTracking ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                    <span>{copiedTracking ? 'Copiado' : 'Copiar'}</span>
+                  </button>
+                </div>
+              )}
               <p className="text-xs text-[#555552]">
                 <span className="text-[#72726E]">Método de Pagamento:</span>{' '}
                 <span className="font-medium text-[#1C1C1E]">{order.paymentMethod}</span>

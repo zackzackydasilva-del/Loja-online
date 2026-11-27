@@ -7,7 +7,13 @@ export type CategoryRenameEntry = {
 
 export type OrderStatus = 'Pendente' | 'Em Preparação' | 'Em Trânsito' | 'Entregue';
 
-export type PaymentMethod = 'Multicaixa Express' | 'Cartão' | 'Contra-Reembolso';
+export type PaymentMethod = string;
+
+export interface PaymentMethodConfig {
+  id: string;
+  label: string;
+  enabled: boolean;
+}
 
 export interface ProductColorVariant {
   name: string;
@@ -91,6 +97,7 @@ export interface StoreOrder {
   discountAmount?: number;
   shippingFee?: number;
   promoCode?: string;
+  trackingCode?: string;
   total: number;
   status: OrderStatus;
   createdAt: string;
@@ -266,6 +273,7 @@ export interface OrderNotificationRecord {
   discountAmount?: number;
   shippingFee?: number;
   promoCode?: string;
+  trackingCode?: string;
   total: number;
   currencySymbol: string;
   items: OrderNotificationItemDetail[];
@@ -307,6 +315,7 @@ export interface StorefrontConfig {
   saleWebhook?: SaleWebhookConfig;
   shippingFee?: number;
   promoDiscountPercent?: number;
+  paymentMethods?: PaymentMethodConfig[];
   catalogEyebrow: string;
   catalogTitle: string;
   guarantees: TrustBadgeConfig[];

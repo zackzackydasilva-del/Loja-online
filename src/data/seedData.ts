@@ -173,6 +173,11 @@ export const DEFAULT_STOREFRONT_CONFIG: StorefrontConfig = {
   },
   shippingFee: 0,
   promoDiscountPercent: 10,
+  paymentMethods: [
+    { id: 'pm-cash', label: 'Contra-Reembolso', enabled: true },
+    { id: 'pm-multicaixa', label: 'Multicaixa Express', enabled: true },
+    { id: 'pm-card', label: 'Cartão', enabled: true },
+  ],
   catalogEyebrow: 'Catálogo',
   catalogTitle: 'As Nossas Escolhas Favoritas',
   guarantees: [

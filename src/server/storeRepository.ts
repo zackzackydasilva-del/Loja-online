@@ -13,6 +13,7 @@ import type {
   OrderNotificationRecord,
   OrderStatus,
   PaymentMethod,
+  PaymentMethodConfig,
   Product,
   ProductCategory,
   ProductColorVariant,
@@ -159,6 +160,29 @@ function mergeStorefrontConfig(raw: unknown): StorefrontConfig {
         : obj.promoDiscountPercent !== undefined && Number.isFinite(Number(obj.promoDiscountPercent))
         ? Math.max(0, Math.min(100, +Number(obj.promoDiscountPercent).toFixed(2)))
         : DEFAULT_STOREFRONT_CONFIG.promoDiscountPercent ?? 10,
+    paymentMethods: (() => {
+      if (!Array.isArray(obj.paymentMethods) || obj.paymentMethods.length === 0) {
+        return DEFAULT_STOREFRONT_CONFIG.paymentMethods!;
+      }
+      const cleaned = obj.paymentMethods
+        .filter((item): item is PaymentMethodConfig => Boolean(item && typeof item === 'object'))
+        .map((item, idx) => {
+          const label = String(item.label || '').trim().slice(0, 60);
+          const id =
+            String(item.id || '')
+              .trim()
+              .replace(/[^a-zA-Z0-9_-]/g, '')
+              .slice(0, 48) || `pm-${idx + 1}`;
+          return {
+            id,
+            label,
+            enabled: item.enabled !== false,
+          };
+        })
+        .filter((item) => item.label.length > 0)
+        .slice(0, 20);
+      return cleaned.length > 0 ? cleaned : DEFAULT_STOREFRONT_CONFIG.paymentMethods!;
+    })(),
     guarantees:
       Array.isArray(obj.guarantees) && obj.guarantees.length > 0
         ? obj.guarantees
@@ -229,6 +253,9 @@ function mergeStorefrontConfigPatch(
           ...patch.saleWebhook,
         }
       : base.saleWebhook || DEFAULT_STOREFRONT_CONFIG.saleWebhook!,
+    paymentMethods: Array.isArray(patch.paymentMethods)
+      ? patch.paymentMethods
+      : base.paymentMethods || DEFAULT_STOREFRONT_CONFIG.paymentMethods!,
     newsletter: {
       ...base.newsletter,
       ...(patch.newsletter || {}),
@@ -260,6 +287,24 @@ interface OrderPricingMeta {
   discountAmount: number;
   shippingFee: number;
   promoCode?: string;
+  trackingCode?: string;
+}
+
+function deriveFallbackTrackingCode(orderId: string): string {
+  const cleanNum = orderId.replace(/[^A-Z0-9]/gi, '').slice(-4).toUpperCase() || '0001';
+  const digest = crypto
+    .createHmac('sha256', 'lunora-tracking-fallback-v1')
+    .update(orderId)
+    .digest('hex')
+    .slice(0, 4)
+    .toUpperCase();
+  return `TRK-${cleanNum}-${digest}`;
+}
+
+function createOrderTrackingCode(orderId: string): string {
+  const cleanNum = orderId.replace(/[^A-Z0-9]/gi, '').slice(-4).toUpperCase() || '0001';
+  const rand = crypto.randomBytes(2).toString('hex').toUpperCase();
+  return `TRK-${cleanNum}-${rand}`;
 }
 
 function isMetaIntegrationId(id: unknown): boolean {
@@ -386,6 +431,9 @@ function normalizeOrderPricingMap(raw: unknown): Record<string, OrderPricingMeta
       shippingFee: Math.max(0, Number(rec.shippingFee) || 0),
       ...(typeof rec.promoCode === 'string' && rec.promoCode.trim()
         ? { promoCode: rec.promoCode.trim().slice(0, 40) }
+        : {}),
+      ...(typeof rec.trackingCode === 'string' && rec.trackingCode.trim()
+        ? { trackingCode: rec.trackingCode.trim().toUpperCase().slice(0, 40) }
         : {}),
     };
   }
@@ -1022,6 +1070,7 @@ function mapOrderFromRow(
     discountAmount: pricingMeta?.discountAmount,
     shippingFee: pricingMeta?.shippingFee,
     promoCode: pricingMeta?.promoCode,
+    trackingCode: pricingMeta?.trackingCode || deriveFallbackTrackingCode(String(row.id)),
     total,
     status: String(row.status) as OrderStatus,
     createdAt: String(row.created_at),
@@ -1715,7 +1764,13 @@ export async function getAdminBundle() {
   return {
     products: memoryStore.products,
     customers: memoryStore.customers,
-    orders: memoryStore.orders,
+    orders: memoryStore.orders.map((o) => ({
+      ...o,
+      trackingCode:
+        o.trackingCode ||
+        memoryStore.orderPricing[o.id]?.trackingCode ||
+        deriveFallbackTrackingCode(o.id),
+    })),
     stockMovements: memoryStore.stockMovements,
     goals: memoryStore.goals,
     tasks: memoryStore.tasks,
@@ -1870,6 +1925,19 @@ export async function upsertCheckoutPendingOrderInStore(input: {
       { onConflict: 'email' }
     );
 
+    const { data: setTrackingRow } = await supabase
+      .from('store_settings')
+      .select('integrations')
+      .eq('id', 1)
+      .maybeSingle();
+    const { embeddedOrderPricing: existingPricingMap } = extractIntegrationsAndConfig(
+      (setTrackingRow as Record<string, unknown> | null)?.integrations
+    );
+    const trackingCode =
+      existingPricingMap[orderId]?.trackingCode ||
+      memoryStore.orderPricing[orderId]?.trackingCode ||
+      createOrderTrackingCode(orderId);
+
     const updatedOrder: StoreOrder = {
       id: orderId,
       customerId: finalCustomerId,
@@ -1885,6 +1953,7 @@ export async function upsertCheckoutPendingOrderInStore(input: {
       discountAmount: pricing.discountAmount,
       shippingFee: pricing.shippingFee,
       promoCode: pricing.promoCode,
+      trackingCode,
       total,
       status: 'Pendente',
       createdAt,
@@ -2002,6 +2071,7 @@ export async function upsertCheckoutPendingOrderInStore(input: {
       discountAmount: pricing.discountAmount,
       shippingFee: pricing.shippingFee,
       promoCode: pricing.promoCode,
+      trackingCode,
     });
     invalidatePublicStoreCache();
     return updatedOrder;
@@ -2063,6 +2133,11 @@ export async function upsertCheckoutPendingOrderInStore(input: {
     cust.postalCode = safePostal;
   }
 
+  const memTrackingCode =
+    existingMem?.trackingCode ||
+    memoryStore.orderPricing[orderId]?.trackingCode ||
+    createOrderTrackingCode(orderId);
+
   const nextOrder: StoreOrder = {
     id: orderId,
     customerId: cust.id,
@@ -2078,6 +2153,7 @@ export async function upsertCheckoutPendingOrderInStore(input: {
     discountAmount: pricing.discountAmount,
     shippingFee: pricing.shippingFee,
     promoCode: pricing.promoCode,
+    trackingCode: memTrackingCode,
     total,
     status: 'Pendente',
     createdAt,
@@ -2091,6 +2167,7 @@ export async function upsertCheckoutPendingOrderInStore(input: {
       discountAmount: pricing.discountAmount,
       shippingFee: pricing.shippingFee,
       promoCode: pricing.promoCode,
+      trackingCode: memTrackingCode,
     },
   };
 
@@ -2186,6 +2263,8 @@ export async function createOrderInStore(input: {
   const createdAt = new Date().toISOString().slice(0, 10);
   const normalizedEmail = input.customerEmail.trim().toLowerCase();
 
+  const trackingCode = createOrderTrackingCode(orderId);
+
   const newOrder: StoreOrder = {
     id: orderId,
     customerName: input.customerName.trim(),
@@ -2200,6 +2279,7 @@ export async function createOrderInStore(input: {
     discountAmount: pricing.discountAmount,
     shippingFee: pricing.shippingFee,
     promoCode: pricing.promoCode,
+    trackingCode,
     total,
     status: 'Pendente',
     createdAt,
@@ -2303,6 +2383,7 @@ export async function createOrderInStore(input: {
       discountAmount: pricing.discountAmount,
       shippingFee: pricing.shippingFee,
       promoCode: pricing.promoCode,
+      trackingCode,
     });
     invalidatePublicStoreCache();
     return { ...newOrder, customerId: resolvedCustomerId };
@@ -2332,6 +2413,7 @@ export async function createOrderInStore(input: {
       discountAmount: pricing.discountAmount,
       shippingFee: pricing.shippingFee,
       promoCode: pricing.promoCode,
+      trackingCode,
     },
   };
   memoryStore.orders = [newOrder, ...memoryStore.orders];
@@ -2466,6 +2548,8 @@ export async function createManualOrderInStore(input: {
   const status = input.status;
   const progressStep = stepMap[status] ?? 1;
 
+  const manualTrackingCode = createOrderTrackingCode(orderId);
+
   const newOrder: StoreOrder = {
     id: orderId,
     customerName,
@@ -2480,6 +2564,7 @@ export async function createManualOrderInStore(input: {
     discountAmount: pricing.discountAmount,
     shippingFee: pricing.shippingFee,
     promoCode: pricing.promoCode,
+    trackingCode: manualTrackingCode,
     total,
     status,
     createdAt,
@@ -2598,6 +2683,7 @@ export async function createManualOrderInStore(input: {
       discountAmount: pricing.discountAmount,
       shippingFee: pricing.shippingFee,
       promoCode: pricing.promoCode,
+      trackingCode: manualTrackingCode,
     });
     invalidatePublicStoreCache();
     return { ...newOrder, customerId: resolvedCustomerId };
@@ -2626,6 +2712,7 @@ export async function createManualOrderInStore(input: {
       discountAmount: pricing.discountAmount,
       shippingFee: pricing.shippingFee,
       promoCode: pricing.promoCode,
+      trackingCode: manualTrackingCode,
     },
   };
   memoryStore.orders = [newOrder, ...memoryStore.orders];
@@ -4382,4 +4469,131 @@ export async function getSaleWebhookDeliveriesInStore(): Promise<SaleWebhookDeli
     }
   }
   return memoryStore.saleWebhooks.slice(0, 100);
+}
+
+export interface PublicOrderTrackingResult {
+  trackingCode: string;
+  orderId: string;
+  status: OrderStatus;
+  progressStep: number;
+  totalSteps: number;
+  createdAt: string;
+  city: string;
+  paymentMethod: PaymentMethod;
+  total: number;
+  currencySymbol: string;
+  items: {
+    name: string;
+    size: string;
+    quantity: number;
+    unitPrice: number;
+  }[];
+}
+
+export async function trackOrderByCodeInStore(
+  rawCode: string
+): Promise<PublicOrderTrackingResult | null> {
+  const normalized = rawCode.trim().replace(/^#/, '').toUpperCase().slice(0, 48);
+  if (normalized.length < 4 || !/^[A-Z0-9-]+$/.test(normalized)) {
+    return null;
+  }
+
+  const publicData = await getPublicStoreData();
+  const currencySymbol = publicData.settings.currencySymbol || 'Kz';
+  const supabase = getSupabaseClient();
+
+  if (supabase) {
+    try {
+      await ensureSupabaseSeeded(supabase).catch(() => false);
+      const [ordRes, itemRes, setRes] = await Promise.all([
+        supabase.from('orders').select('*').order('created_at', { ascending: false }),
+        supabase.from('order_items').select('*'),
+        supabase.from('store_settings').select('integrations').eq('id', 1).maybeSingle(),
+      ]);
+
+      if (!ordRes.error && Array.isArray(ordRes.data)) {
+        const itemsByOrder = new Map<string, OrderItemSummary[]>();
+        (itemRes.data ?? []).forEach((row) => {
+          const orderId = String(row.order_id);
+          const list = itemsByOrder.get(orderId) ?? [];
+          list.push({
+            productId: row.product_id ? String(row.product_id) : '',
+            name: String(row.product_name),
+            size: String(row.size),
+            quantity: Number(row.quantity),
+            unitPrice: Number(row.unit_price),
+          });
+          itemsByOrder.set(orderId, list);
+        });
+
+        const { embeddedOrderPricing } = extractIntegrationsAndConfig(
+          (setRes.data as Record<string, unknown> | null)?.integrations
+        );
+        const mergedPricing = { ...memoryStore.orderPricing, ...embeddedOrderPricing };
+
+        for (const row of ordRes.data) {
+          const orderId = String(row.id);
+          const mapped = mapOrderFromRow(
+            row as Record<string, unknown>,
+            itemsByOrder.get(orderId),
+            mergedPricing[orderId]
+          );
+          const trk = (mapped.trackingCode || deriveFallbackTrackingCode(mapped.id)).toUpperCase();
+          if (trk === normalized || mapped.id.toUpperCase() === normalized) {
+            return {
+              trackingCode: trk,
+              orderId: mapped.id,
+              status: mapped.status,
+              progressStep: mapped.progressStep,
+              totalSteps: mapped.totalSteps,
+              createdAt: mapped.createdAt,
+              city: mapped.city,
+              paymentMethod: mapped.paymentMethod,
+              total: mapped.total,
+              currencySymbol,
+              items: mapped.items.map((item) => ({
+                name: item.name,
+                size: item.size,
+                quantity: item.quantity,
+                unitPrice: item.unitPrice,
+              })),
+            };
+          }
+        }
+        return null;
+      }
+    } catch {
+      // Fallback to memory store below
+    }
+  }
+
+  for (const order of memoryStore.orders) {
+    const trk = (
+      order.trackingCode ||
+      memoryStore.orderPricing[order.id]?.trackingCode ||
+      deriveFallbackTrackingCode(order.id)
+    ).toUpperCase();
+    if (trk === normalized || order.id.toUpperCase() === normalized) {
+      return {
+        trackingCode: trk,
+        orderId: order.id,
+        status: order.status,
+        progressStep: order.progressStep,
+        totalSteps: order.totalSteps,
+        createdAt: order.createdAt,
+        city: order.city,
+        paymentMethod: order.paymentMethod,
+        total: order.total,
+        currencySymbol,
+        items: order.items.map((item) => ({
+          name: item.name,
+          size: item.size,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+        })),
+      };
+    }
+  }
+
+  return null;
 }

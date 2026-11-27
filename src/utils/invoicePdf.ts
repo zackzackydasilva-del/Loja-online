@@ -102,8 +102,8 @@ export function downloadOrderInvoicePdf(params: {
   }
 
   // Header right invoice badge box
-  const boxW = 62;
-  const boxH = 26;
+  const boxW = 64;
+  const boxH = order.trackingCode ? 34 : 26;
   const boxX = pageWidth - margin - boxW;
   const boxY = 14;
   doc.setFillColor(246, 246, 244);
@@ -119,15 +119,37 @@ export function downloadOrderInvoicePdf(params: {
   doc.setTextColor(28, 28, 30);
   doc.text(safePdfText(`FAC-${order.id}`), boxX + boxW - 4, boxY + 11.5, { align: 'right' });
 
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
-  doc.setTextColor(114, 114, 110);
-  doc.text('Data de Registo', boxX + boxW - 4, boxY + 17.5, { align: 'right' });
+  if (order.trackingCode) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(114, 114, 110);
+    doc.text('Código de Rastreio', boxX + boxW - 4, boxY + 17, { align: 'right' });
 
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9);
-  doc.setTextColor(28, 28, 30);
-  doc.text(safePdfText(order.createdAt), boxX + boxW - 4, boxY + 22.5, { align: 'right' });
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(28, 28, 30);
+    doc.text(safePdfText(order.trackingCode), boxX + boxW - 4, boxY + 21.5, { align: 'right' });
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(114, 114, 110);
+    doc.text('Data de Registo', boxX + boxW - 4, boxY + 26.5, { align: 'right' });
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(28, 28, 30);
+    doc.text(safePdfText(order.createdAt), boxX + boxW - 4, boxY + 31, { align: 'right' });
+  } else {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(114, 114, 110);
+    doc.text('Data de Registo', boxX + boxW - 4, boxY + 17.5, { align: 'right' });
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(28, 28, 30);
+    doc.text(safePdfText(order.createdAt), boxX + boxW - 4, boxY + 22.5, { align: 'right' });
+  }
 
   y = Math.max(y + 4, boxY + boxH + 6);
   doc.setDrawColor(225, 225, 222);
@@ -151,19 +173,32 @@ export function downloadOrderInvoicePdf(params: {
     ),
   ];
 
-  const paymentLines = [
-    ...doc.splitTextToSize(safePdfText(`Referência do Pedido: #${order.id}`), colW - 8),
-    ...doc.splitTextToSize(safePdfText(`Método de Pagamento: ${order.paymentMethod}`), colW - 8),
-    ...doc.splitTextToSize(safePdfText(`Estado da Encomenda: ${order.status}`), colW - 8),
-    ...doc.splitTextToSize(
-      safePdfText(
-        `Situação Financeira: ${isPaid ? 'Pago e Contabilizado' : 'Pendente (Não contabilizado)'}`
-      ),
-      colW - 8
-    ),
+  const paymentEntries: { text: string; isFinancial?: boolean }[] = [
+    ...doc
+      .splitTextToSize(safePdfText(`Referência do Pedido: #${order.id}`), colW - 8)
+      .map((text: string) => ({ text })),
+    ...(order.trackingCode
+      ? doc
+          .splitTextToSize(safePdfText(`Código de Rastreio: ${order.trackingCode}`), colW - 8)
+          .map((text: string) => ({ text }))
+      : []),
+    ...doc
+      .splitTextToSize(safePdfText(`Método de Pagamento: ${order.paymentMethod}`), colW - 8)
+      .map((text: string) => ({ text })),
+    ...doc
+      .splitTextToSize(safePdfText(`Estado da Encomenda: ${order.status}`), colW - 8)
+      .map((text: string) => ({ text })),
+    ...doc
+      .splitTextToSize(
+        safePdfText(
+          `Situação Financeira: ${isPaid ? 'Pago e Contabilizado' : 'Pendente (Não contabilizado)'}`
+        ),
+        colW - 8
+      )
+      .map((text: string) => ({ text, isFinancial: true })),
   ];
 
-  const cardH = Math.max(customerLines.length, paymentLines.length) * 4.4 + 13;
+  const cardH = Math.max(customerLines.length, paymentEntries.length) * 4.4 + 13;
   doc.setFillColor(246, 246, 244);
   doc.roundedRect(margin, y, colW, cardH, 3, 3, 'F');
   doc.roundedRect(margin + colW + colGap, y, colW, cardH, 3, 3, 'F');
@@ -184,10 +219,10 @@ export function downloadOrderInvoicePdf(params: {
   });
 
   let py = y + 11.5;
-  paymentLines.forEach((line, index) => {
-    doc.setFont('helvetica', index === 3 ? 'bold' : 'normal');
+  paymentEntries.forEach((entry) => {
+    doc.setFont('helvetica', entry.isFinancial ? 'bold' : 'normal');
     doc.setFontSize(8.5);
-    if (index === 3) {
+    if (entry.isFinancial) {
       if (isPaid) {
         doc.setTextColor(4, 120, 87);
       } else {
@@ -196,7 +231,7 @@ export function downloadOrderInvoicePdf(params: {
     } else {
       doc.setTextColor(65, 65, 62);
     }
-    doc.text(line, margin + colW + colGap + 4, py);
+    doc.text(entry.text, margin + colW + colGap + 4, py);
     py += 4.4;
   });
 

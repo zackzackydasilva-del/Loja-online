@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, Clock, FileText, Package, Plus, Trash2, X } from 'lucide-react';
+import { Check, CheckCircle2, Clock, Copy, FileText, Package, Plus, Trash2, X } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import { OrderStatus, StoreOrder } from '../../types/store';
 import { formatMoney } from '../../utils/currency';
@@ -29,6 +29,7 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState('');
+  const [copiedTrackingId, setCopiedTrackingId] = useState<string | null>(null);
 
   const handleDeleteOrder = async (orderId: string) => {
     setDeletingId(orderId);
@@ -72,6 +73,7 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
       const matchQuery =
         !q ||
         order.id.toLowerCase().includes(q) ||
+        (order.trackingCode || '').toLowerCase().includes(q) ||
         order.customerName.toLowerCase().includes(q) ||
         order.city.toLowerCase().includes(q);
       return matchStatus && matchQuery;
@@ -172,7 +174,12 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
                         }`}
                       >
                         <td className="py-3.5 px-5 font-mono text-xs font-medium text-[#1C1C1E]">
-                          #{order.id}
+                          <p>#{order.id}</p>
+                          {order.trackingCode && (
+                            <p className="text-[10px] text-[#72726E] font-normal">
+                              {order.trackingCode}
+                            </p>
+                          )}
                         </td>
                         <td className="py-3.5 px-4">
                           <button
@@ -324,9 +331,40 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
                       : 'bg-[#28282B] text-white'
                   }`}
                 >
-                  {selectedOrder.status === 'Entregue' ? 'Entregue · Pago' : 'Pendente · Não pago'}
+                  {selectedOrder.status === 'Entregue'
+                    ? 'Entregue · Pago'
+                    : `${selectedOrder.status} · Não pago`}
                 </span>
               </div>
+
+              {selectedOrder.trackingCode && (
+                <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-white/10">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wider text-white/60">
+                      Código de Rastreio
+                    </p>
+                    <p className="text-xs font-mono font-semibold text-white">
+                      {selectedOrder.trackingCode}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard?.writeText(selectedOrder.trackingCode || '');
+                      setCopiedTrackingId(selectedOrder.id);
+                      window.setTimeout(() => setCopiedTrackingId(null), 1800);
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25 text-[11px] font-medium text-white cursor-pointer"
+                  >
+                    {copiedTrackingId === selectedOrder.id ? (
+                      <Check className="w-3 h-3" />
+                    ) : (
+                      <Copy className="w-3 h-3" />
+                    )}
+                    <span>{copiedTrackingId === selectedOrder.id ? 'Copiado' : 'Copiar'}</span>
+                  </button>
+                </div>
+              )}
 
               <div className="space-y-1 text-xs text-white/75">
                 <p>
@@ -419,32 +457,38 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
               </div>
 
               <div className="space-y-2.5">
-                <label className="block text-[11px] text-white/60">Alterar Estado</label>
+                <label className="block text-[11px] text-white/60">
+                  Alterar Estado (visível no rastreio do cliente)
+                </label>
                 <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => updateOrderStatus(selectedOrder.id, 'Pendente')}
-                    className={`py-2 px-3 rounded-xl text-xs font-medium transition-colors cursor-pointer ${
-                      selectedOrder.status !== 'Entregue'
-                        ? 'bg-white text-[#1C1C1E]'
-                        : 'bg-[#28282B] text-white/80 hover:bg-[#323236]'
-                    }`}
-                  >
-                    Pendente (Não pago)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => updateOrderStatus(selectedOrder.id, 'Entregue')}
-                    className={`py-2 px-3 rounded-xl text-xs font-medium transition-colors cursor-pointer ${
-                      selectedOrder.status === 'Entregue'
+                  {(
+                    [
+                      { value: 'Pendente', label: 'Pendente' },
+                      { value: 'Em Preparação', label: 'Em Preparação' },
+                      { value: 'Em Trânsito', label: 'Em Trânsito' },
+                      { value: 'Entregue', label: 'Entregue · Pago' },
+                    ] as { value: OrderStatus; label: string }[]
+                  ).map((st) => {
+                    const isActive = selectedOrder.status === st.value;
+                    const activeClass =
+                      st.value === 'Entregue'
                         ? 'bg-emerald-600 text-white'
-                        : 'bg-[#28282B] text-white/80 hover:bg-[#323236]'
-                    }`}
-                  >
-                    {selectedOrder.status === 'Entregue'
-                      ? 'Aprovado · Entregue'
-                      : 'Aprovar (Entregue)'}
-                  </button>
+                        : 'bg-white text-[#1C1C1E]';
+                    return (
+                      <button
+                        key={st.value}
+                        type="button"
+                        onClick={() => updateOrderStatus(selectedOrder.id, st.value)}
+                        className={`py-2 px-2.5 rounded-xl text-xs font-medium transition-colors cursor-pointer ${
+                          isActive
+                            ? activeClass
+                            : 'bg-[#28282B] text-white/80 hover:bg-[#323236]'
+                        }`}
+                      >
+                        {st.label}
+                      </button>
+                    );
+                  })}
                 </div>
 
                 <button

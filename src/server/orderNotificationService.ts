@@ -103,6 +103,7 @@ function buildEmailBodies(
     title,
     `Loja: ${storeName}`,
     `Encomenda: #${order.id}`,
+    ...(order.trackingCode ? [`Código de Rastreio: ${order.trackingCode}`] : []),
     `Data: ${new Date().toLocaleString('pt-PT')}`,
     `Subtotal: ${formatMoney(itemsSubtotal, currencySymbol)}`,
     ...(discountAmount > 0
@@ -187,6 +188,11 @@ function buildEmailBodies(
         <div style="padding:22px 24px;">
           <div style="background:#f5f4f0;border-radius:14px;padding:14px 16px;margin-bottom:18px;font-size:13px;line-height:1.6;">
             <div><strong>Encomenda:</strong> #${escapeHtml(order.id)}</div>
+            ${
+              order.trackingCode
+                ? `<div><strong>Código de Rastreio:</strong> <span style="font-family:monospace;font-weight:700;">${escapeHtml(order.trackingCode)}</span></div>`
+                : ''
+            }
             <div><strong>Subtotal:</strong> ${escapeHtml(formatMoney(itemsSubtotal, currencySymbol))}</div>
             ${
               discountAmount > 0
@@ -398,6 +404,7 @@ export async function notifyNewOrderAsync(
     discountAmount: order.discountAmount,
     shippingFee: order.shippingFee,
     promoCode: order.promoCode,
+    trackingCode: order.trackingCode,
     total: order.total,
     currencySymbol: ctx.currencySymbol,
     items: detailedItems,

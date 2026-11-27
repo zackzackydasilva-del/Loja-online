@@ -1,7 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, CheckCircle2, Minus, Plus, ShoppingBag, Trash2, X } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, Check, CheckCircle2, Copy, Minus, Plus, ShoppingBag, Trash2, X } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
-import { PaymentMethod, StoreOrder } from '../../types/store';
+import { PaymentMethod, PaymentMethodConfig, StoreOrder } from '../../types/store';
 import { formatMoney } from '../../utils/currency';
 import { getVisitorSessionId, reportVisitorStage } from '../../utils/storeTracker';
 import { SafeImage } from '../SafeImage';
@@ -57,12 +57,35 @@ export const CartDrawer: React.FC = () => {
 
   const [checkoutError, setCheckoutError] = useState('');
   const [submittingOrder, setSubmittingOrder] = useState(false);
+  const [copiedTracking, setCopiedTracking] = useState(false);
   const [draftOrderId, setDraftOrderId] = useState<string>(() => readStoredDraftId());
   const draftOrderIdRef = useRef<string>(draftOrderId);
   draftOrderIdRef.current = draftOrderId;
   const lastSavedPayloadRef = useRef<string>('');
   const triggeredPopupOrderIdRef = useRef<string>('');
   const postCheckoutTimerRef = useRef<number | null>(null);
+
+  const availablePaymentMethods = useMemo<PaymentMethodConfig[]>(() => {
+    const configured = settings.storefrontConfig.paymentMethods;
+    if (Array.isArray(configured) && configured.length > 0) {
+      const enabled = configured.filter((m) => m.enabled && m.label.trim());
+      if (enabled.length > 0) return enabled;
+    }
+    return [
+      { id: 'pm-cash', label: 'Contra-Reembolso', enabled: true },
+      { id: 'pm-mcx', label: 'Multicaixa Express', enabled: true },
+      { id: 'pm-card', label: 'Cartão', enabled: true },
+    ];
+  }, [settings.storefrontConfig.paymentMethods]);
+
+  useEffect(() => {
+    if (!availablePaymentMethods.some((m) => m.label === form.paymentMethod)) {
+      setForm((prev) => ({
+        ...prev,
+        paymentMethod: availablePaymentMethods[0]?.label || 'Contra-Reembolso',
+      }));
+    }
+  }, [availablePaymentMethods, form.paymentMethod]);
 
   const activePromoCode = (settings.storefrontConfig.newsletter.promoCode || 'LUNORA10').trim().toUpperCase();
   const promoDiscountPercent = Math.max(
@@ -376,7 +399,49 @@ export const CartDrawer: React.FC = () => {
                 </p>
               </div>
 
+              {confirmedOrder.trackingCode && (
+                <div className="bg-[#141413] text-[#F8F6F2] rounded-xl p-4 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-[11px] uppercase tracking-wider text-white/65">
+                        Código de Rastreio
+                      </p>
+                      <p className="text-base font-mono font-bold tracking-wider">
+                        {confirmedOrder.trackingCode}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard?.writeText(confirmedOrder.trackingCode || '');
+                        setCopiedTracking(true);
+                        window.setTimeout(() => setCopiedTracking(false), 1800);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-xs font-medium text-white cursor-pointer"
+                    >
+                      {copiedTracking ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedTracking ? 'Copiado' : 'Copiar'}</span>
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-white/75 leading-relaxed">
+                    Guarde este código. Pode colocá-lo no ícone de Perfil na loja para acompanhar o estado do seu produto.
+                  </p>
+                </div>
+              )}
+
               <div className="bg-white rounded-xl p-5 border border-[#141413]/10 space-y-3 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-[#66635C]">Factura / Pedido</span>
+                  <span className="font-mono font-medium text-[#141413]">FAC-{confirmedOrder.id}</span>
+                </div>
+                {confirmedOrder.trackingCode && (
+                  <div className="flex justify-between">
+                    <span className="text-[#66635C]">Código de Rastreio</span>
+                    <span className="font-mono font-semibold text-[#141413]">
+                      {confirmedOrder.trackingCode}
+                    </span>
+                  </div>
+                )}
                 <div className="flex justify-between">
                   <span className="text-[#66635C]">Estado</span>
                   <span className="font-medium text-[#141413]">{confirmedOrder.status}</span>
@@ -634,24 +699,24 @@ export const CartDrawer: React.FC = () => {
 
               <div>
                 <label className="block text-xs font-medium text-[#141413] mb-1.5">
-                  Pagamento na Entrega
+                  Modo de Pagamento
                 </label>
                 <p className="text-[11px] text-[#555555] bg-white border border-[#141413]/10 rounded-lg px-3 py-2 mb-2">
-                  O pagamento é feito apenas no ato da entrega (em dinheiro ou TPA/Multicaixa móvel).
+                  Escolha um dos modos de pagamento disponíveis na loja.
                 </p>
-                <div className="grid grid-cols-3 gap-2">
-                  {(['Contra-Reembolso', 'Multicaixa Express', 'Cartão'] as const).map((method) => (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {availablePaymentMethods.map((method) => (
                     <button
-                      key={method}
+                      key={method.id}
                       type="button"
-                      onClick={() => setForm({ ...form, paymentMethod: method })}
-                      className={`py-2.5 px-2 text-[11px] font-medium rounded-lg border transition-colors cursor-pointer ${
-                        form.paymentMethod === method
+                      onClick={() => setForm({ ...form, paymentMethod: method.label })}
+                      className={`py-2.5 px-2.5 text-[11px] font-medium rounded-lg border transition-colors cursor-pointer ${
+                        form.paymentMethod === method.label
                           ? 'bg-[#141413] text-[#F8F6F2] border-[#141413]'
                           : 'bg-white text-[#141413] border-[#141413]/15'
                       }`}
                     >
-                      {method === 'Contra-Reembolso' ? 'Dinheiro na Entrega' : method}
+                      {method.label === 'Contra-Reembolso' ? 'Dinheiro na Entrega' : method.label}
                     </button>
                   ))}
                 </div>

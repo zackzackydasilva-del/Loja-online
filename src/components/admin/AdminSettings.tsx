@@ -5,6 +5,7 @@ import {
   Bell,
   Check,
   Copy,
+  CreditCard,
   ExternalLink,
   LayoutTemplate,
   Lock,
@@ -100,6 +101,10 @@ function mergeStorefrontConfig(cfg?: Partial<StorefrontConfig>): StorefrontConfi
       ...DEFAULT_STOREFRONT_CONFIG.saleWebhook!,
       ...(cfg?.saleWebhook || {}),
     },
+    paymentMethods:
+      Array.isArray(cfg?.paymentMethods) && cfg.paymentMethods.length > 0
+        ? cfg.paymentMethods
+        : DEFAULT_STOREFRONT_CONFIG.paymentMethods,
     guarantees:
       cfg?.guarantees && cfg.guarantees.length > 0
         ? cfg.guarantees
@@ -172,6 +177,7 @@ export const AdminSettings: React.FC = () => {
 
   const [newChannelName, setNewChannelName] = useState('');
   const [newChannelRole, setNewChannelRole] = useState('');
+  const [newPaymentLabel, setNewPaymentLabel] = useState('');
 
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearingData, setClearingData] = useState(false);
@@ -282,12 +288,26 @@ export const AdminSettings: React.FC = () => {
       })
       .filter((item) => item.label && item.category);
 
+    const cleanedPaymentMethods = (nextSf.paymentMethods || DEFAULT_STOREFRONT_CONFIG.paymentMethods || [])
+      .map((m) => ({
+        ...m,
+        label: m.label.trim().slice(0, 60),
+      }))
+      .filter((m) => m.label.length > 0);
+    const normalizedPaymentMethods =
+      cleanedPaymentMethods.length > 0
+        ? cleanedPaymentMethods.some((m) => m.enabled)
+          ? cleanedPaymentMethods
+          : cleanedPaymentMethods.map((m, idx) => (idx === 0 ? { ...m, enabled: true } : m))
+        : DEFAULT_STOREFRONT_CONFIG.paymentMethods;
+
     const preparedSf: StorefrontConfig = {
       ...nextSf,
       categoryStripItems:
         cleanedCategoryStrip.length > 0
           ? cleanedCategoryStrip
           : DEFAULT_STOREFRONT_CONFIG.categoryStripItems,
+      paymentMethods: normalizedPaymentMethods,
       highlights: (nextSf.highlights || []).slice(0, MAX_HIGHLIGHTS).map((hl) => ({
         ...hl,
         productId: '',
@@ -599,6 +619,124 @@ export const AdminSettings: React.FC = () => {
                       className="w-full font-mono tabular-nums border border-black/15 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-[#1C1C1E]"
                     />
                   </div>
+                </div>
+              </div>
+
+              {/* Payment Methods Configuration */}
+              <div className="p-4 rounded-2xl bg-[#F6F6F4] border border-black/8 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <CreditCard className="w-4 h-4 text-[#1C1C1E]" />
+                    <span className="text-xs font-semibold text-[#1C1C1E]">
+                      Modos de Pagamento na Loja
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-[#72726E]">
+                    {(sf.paymentMethods || []).filter((m) => m.enabled).length} ativo(s)
+                  </span>
+                </div>
+                <p className="text-[11px] text-[#555552]">
+                  Adicione, renomeie ou ative/desative os métodos de pagamento mostrados aos clientes no checkout.
+                </p>
+
+                <div className="space-y-2">
+                  {(sf.paymentMethods || DEFAULT_STOREFRONT_CONFIG.paymentMethods || []).map((pm) => {
+                    const allMethods =
+                      sf.paymentMethods || DEFAULT_STOREFRONT_CONFIG.paymentMethods || [];
+                    const enabledCount = allMethods.filter((m) => m.enabled).length;
+                    const canDisable = !pm.enabled || enabledCount > 1;
+                    const canRemove = allMethods.length > 1 && (!pm.enabled || enabledCount > 1);
+                    return (
+                      <div
+                        key={pm.id}
+                        className="flex flex-wrap items-center gap-2 bg-white border border-black/10 rounded-xl p-2"
+                      >
+                        <input
+                          type="text"
+                          value={pm.label}
+                          maxLength={60}
+                          onChange={(e) => {
+                            const nextMethods = allMethods.map((item) =>
+                              item.id === pm.id ? { ...item, label: e.target.value } : item
+                            );
+                            updateSfDraft({ ...sf, paymentMethods: nextMethods });
+                          }}
+                          className="flex-1 min-w-[160px] px-2.5 py-1.5 text-xs font-medium text-[#1C1C1E] bg-[#F8F8F6] border border-black/10 rounded-lg focus:outline-none focus:border-[#1C1C1E]"
+                        />
+                        <button
+                          type="button"
+                          disabled={!canDisable}
+                          onClick={() => {
+                            const nextMethods = allMethods.map((item) =>
+                              item.id === pm.id ? { ...item, enabled: !item.enabled } : item
+                            );
+                            updateSfDraft({ ...sf, paymentMethods: nextMethods });
+                          }}
+                          className={`px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors cursor-pointer disabled:opacity-45 ${
+                            pm.enabled
+                              ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                              : 'bg-[#EFECE5] text-[#555552] hover:bg-[#E4DFD4]'
+                          }`}
+                        >
+                          {pm.enabled ? 'Ativo' : 'Inativo'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!canRemove}
+                          onClick={() => {
+                            const nextMethods = allMethods.filter((item) => item.id !== pm.id);
+                            updateSfDraft({ ...sf, paymentMethods: nextMethods });
+                          }}
+                          aria-label={`Remover ${pm.label}`}
+                          className="p-1.5 rounded-lg text-[#72726E] hover:text-red-600 hover:bg-red-50 disabled:opacity-35 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="flex flex-wrap gap-2 pt-1">
+                  <input
+                    type="text"
+                    value={newPaymentLabel}
+                    maxLength={60}
+                    onChange={(e) => setNewPaymentLabel(e.target.value)}
+                    placeholder="Ex: Transferência Bancária / BAI Directo"
+                    className="flex-1 min-w-[200px] bg-white border border-black/15 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#1C1C1E]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const clean = newPaymentLabel.trim().slice(0, 60);
+                      if (!clean) return;
+                      const currentMethods =
+                        sf.paymentMethods || DEFAULT_STOREFRONT_CONFIG.paymentMethods || [];
+                      if (
+                        currentMethods.some(
+                          (m) => m.label.trim().toLowerCase() === clean.toLowerCase()
+                        )
+                      ) {
+                        setNewPaymentLabel('');
+                        return;
+                      }
+                      const nextMethods = [
+                        ...currentMethods,
+                        {
+                          id: `pm-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+                          label: clean,
+                          enabled: true,
+                        },
+                      ];
+                      updateSfDraft({ ...sf, paymentMethods: nextMethods });
+                      setNewPaymentLabel('');
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#1C1C1E] text-white text-xs font-medium rounded-xl hover:bg-[#323235] cursor-pointer shrink-0"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Adicionar Modo</span>
+                  </button>
                 </div>
               </div>
 

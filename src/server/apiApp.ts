@@ -22,6 +22,7 @@ import {
   saveAdminPasswordHash,
   subscribeNewsletterInStore,
   toggleGoalInStore,
+  trackOrderByCodeInStore,
   updateOrderStatusInStore,
   updateProductInStore,
   updateSettingsInStore,
@@ -213,6 +214,48 @@ app.get('/api/store', async (_req, res) => {
   }
 });
 
+app.get('/api/orders/track', async (req, res) => {
+  try {
+    const code = typeof req.query.code === 'string' ? req.query.code.trim() : '';
+    if (!code || code.length < 4 || code.length > 48) {
+      res.status(400).json({ error: 'Introduza um código de rastreio válido (mín. 4 caracteres).' });
+      return;
+    }
+    const result = await trackOrderByCodeInStore(code);
+    if (!result) {
+      res.status(404).json({ error: 'Nenhuma encomenda encontrada para este código de rastreio.' });
+      return;
+    }
+    res.json({ ok: true, tracking: result });
+  } catch {
+    res.status(500).json({ error: 'Não foi possível consultar o rastreio neste momento.' });
+  }
+});
+
+async function resolveConfiguredPaymentMethod(
+  rawMethod: unknown,
+  allowDisabled = false
+): Promise<string> {
+  const candidate = typeof rawMethod === 'string' ? rawMethod.trim().slice(0, 60) : '';
+  const data = await getPublicStoreData();
+  const configured = data.settings.storefrontConfig.paymentMethods || [];
+  const pool = allowDisabled ? configured : configured.filter((m) => m.enabled);
+  const effectivePool = pool.length > 0 ? pool : configured;
+
+  if (effectivePool.length === 0) {
+    return 'Contra-Reembolso';
+  }
+  if (candidate) {
+    const matched = effectivePool.find(
+      (m) =>
+        m.label.toLowerCase() === candidate.toLowerCase() ||
+        m.id.toLowerCase() === candidate.toLowerCase()
+    );
+    if (matched) return matched.label;
+  }
+  return effectivePool[0].label;
+}
+
 app.post('/api/orders/draft', async (req, res) => {
   try {
     const body = req.body ?? {};
@@ -237,10 +280,7 @@ app.post('/api/orders/draft', async (req, res) => {
       return;
     }
 
-    const allowedPayments = ['Multicaixa Express', 'Cartão', 'Contra-Reembolso'];
-    const paymentMethod = allowedPayments.includes(body.paymentMethod)
-      ? body.paymentMethod
-      : 'Contra-Reembolso';
+    const paymentMethod = await resolveConfiguredPaymentMethod(body.paymentMethod, false);
 
     const order = await upsertCheckoutPendingOrderInStore({
       draftOrderId: typeof body.draftOrderId === 'string' ? body.draftOrderId.trim() : undefined,
@@ -285,10 +325,7 @@ app.post('/api/orders', async (req, res) => {
       return;
     }
 
-    const allowedPayments = ['Multicaixa Express', 'Cartão', 'Contra-Reembolso'];
-    const paymentMethod = allowedPayments.includes(body.paymentMethod)
-      ? body.paymentMethod
-      : 'Contra-Reembolso';
+    const paymentMethod = await resolveConfiguredPaymentMethod(body.paymentMethod, false);
 
     const order = await createOrderInStore({
       draftOrderId: typeof body.draftOrderId === 'string' ? body.draftOrderId.trim() : undefined,
@@ -599,10 +636,7 @@ app.post('/api/admin/orders', requireAdminAuth, async (req, res) => {
       return;
     }
 
-    const allowedPayments = ['Multicaixa Express', 'Cartão', 'Contra-Reembolso'] as const;
-    const paymentMethod = allowedPayments.includes(body.paymentMethod)
-      ? body.paymentMethod
-      : 'Contra-Reembolso';
+    const paymentMethod = await resolveConfiguredPaymentMethod(body.paymentMethod, true);
 
     const allowedStatuses: OrderStatus[] = ['Pendente', 'Em Preparação', 'Em Trânsito', 'Entregue'];
     const status: OrderStatus = allowedStatuses.includes(body.status) ? body.status : 'Pendente';
@@ -1069,6 +1103,32 @@ app.patch('/api/admin/settings', requireAdminAuth, async (req, res) => {
           Number.isFinite(pctNum) && pctNum >= 0
             ? Math.min(100, +pctNum.toFixed(2))
             : 0;
+      }
+      if (Array.isArray(cfg.paymentMethods)) {
+        const cleaned = cfg.paymentMethods
+          .filter((item: any) => item && typeof item === 'object')
+          .map((item: any, idx: number) => {
+            const label = typeof item.label === 'string' ? item.label.trim().slice(0, 60) : '';
+            const id =
+              typeof item.id === 'string'
+                ? item.id.trim().replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 48)
+                : '';
+            return {
+              id: id || `pm-${Date.now()}-${idx + 1}`,
+              label,
+              enabled: item.enabled !== false,
+            };
+          })
+          .filter((item: { label: string }) => item.label.length > 0)
+          .slice(0, 20);
+        if (cleaned.length === 0) {
+          res.status(400).json({ error: 'Configure pelo menos um modo de pagamento.' });
+          return;
+        }
+        if (!cleaned.some((item: { enabled: boolean }) => item.enabled)) {
+          cleaned[0].enabled = true;
+        }
+        cfg.paymentMethods = cleaned;
       }
       if (cfg.saleWebhook !== undefined && cfg.saleWebhook && typeof cfg.saleWebhook === 'object') {
         const rawUrl =
